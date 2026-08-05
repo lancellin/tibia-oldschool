@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}{{ actor_name }} — Quarentena{% endblock %}
+{% block content %}
+<section class="heading">
+  <div>
+    <p class="eyebrow">Último manipulador registrado</p>
+    <h1>{{ actor_name }}</h1>
+    <p class="lede">
+      {% if actor_guid %}GUID #{{ actor_guid }}. Use estas ocorrências como índice para localizar e revisar a CAM.{% else %}
+      Itens sem GUID investigativo disponível. Não atribua automaticamente essas ocorrências a nenhum jogador.
+      {% endif %}
+    </p>
+  </div>
+  <a class="button secondary" href="/players">Voltar aos jogadores</a>
+</section>
+
+<section class="metrics">
+  <article><span>Total de unidades</span><strong>{{ summary.total_units or 0 }}</strong></article>
+  <article><span>Pilhas</span><strong>{{ summary.stack_count or 0 }}</strong></article>
+  <article><span>Tipos de item</span><strong>{{ summary.item_type_count or 0 }}</strong></article>
+  <article><span>Tiles envolvidos</span><strong>{{ summary.tile_count or 0 }}</strong></article>
+</section>
+
+<section class="risk-strip">
+  <a class="risk-card high {% if risk == 'high' %}active{% endif %}" href="?risk=high{% if source %}&source={{ source }}{% endif %}{% if query %}&query={{ query }}{% endif %}">
+    <span>Atenção imediata</span><strong>{{ risk_totals.high_attention_count or 0 }}</strong><small>0–80 segundos</small>
+  </a>
+  <a class="risk-card review {% if risk == 'review' %}active{% endif %}" href="?risk=review{% if source %}&source={{ source }}{% endif %}{% if query %}&query={{ query }}{% endif %}">
+    <span>Revisar</span><strong>{{ risk_totals.review_attention_count or 0 }}</strong><small>81–299 segundos</small>
+  </a>
+  <a class="risk-card stable {% if risk == 'stable' %}active{% endif %}" href="?risk=stable{% if source %}&source={{ source }}{% endif %}{% if query %}&query={{ query }}{% endif %}">
+    <span>Sinal baixo</span><strong>{{ risk_totals.stable_count or 0 }}</strong><small>5 minutos ou mais</small>
+  </a>
+  <a class="risk-card unknown {% if risk == 'unknown' %}active{% endif %}" href="?risk=unknown{% if source %}&source={{ source }}{% endif %}{% if query %}&query={{ query }}{% endif %}">
+    <span>Sem horário</span><strong>{{ risk_totals.unknown_time_count or 0 }}</strong><small>revisão manual</small>
+  </a>
+</section>
+
+<form class="filters" method="get">
+  <label>Fonte
+    <input name="source" type="number" min="1" value="{{ source or '' }}" placeholder="Todas">
+  </label>
+  <label>Risco
+    <select name="risk">
+      <option value="">Todos</option>
+      <option value="high" {% if risk == "high" %}selected{% endif %}>Atenção: 0–80 s</option>
+      <option value="review" {% if risk == "review" %}selected{% endif %}>Revisar: 81–299 s</option>
+      <option value="stable" {% if risk == "stable" %}selected{% endif %}>Estável: 5+ min</option>
+      <option value="unknown" {% if risk == "unknown" %}selected{% endif %}>Tempo desconhecido</option>
+    </select>
+  </label>
+  <label class="grow">Buscar item ou ID
+    <input name="query" value="{{ query }}" placeholder="Ex.: crystal coin ou 2160">
+  </label>
+  <button class="button" type="submit">Aplicar</button>
+  {% if source or risk or query %}<a class="button secondary" href="/players/{{ actor_guid }}">Limpar</a>{% endif %}
+</form>
+
+<section class="section-heading">
+  <div><p class="eyebrow">Resumo material</p><h2>Itens relacionados</h2></div>
+  <span>{{ item_types | length }} tipo(s) neste recorte</span>
+</section>
+<section class="item-card-grid">
+  {% for item in item_types %}
+    <a class="item-card {% if item.high_attention_count %}high-risk{% endif %}" href="/items/{{ item.item_id }}?actor={{ actor_guid }}{% if source %}&source={{ source }}{% endif %}">
+      <span class="item-card-name">{{ item.item_name }}</span>
+      <span class="item-card-id">ID {{ item.item_id }}</span>
+      <strong>{{ item.total_units }} unidades</strong>
+      <span>{{ item.stack_count }} pilha(s) · {{ item.tile_count }} tile(s)</span>
+      <span class="item-card-risk">
+        {% if item.high_attention_count %}{{ item.high_attention_count }} atenção{% endif %}
+        {% if item.review_attention_count %} · {{ item.review_attention_count }} revisar{% endif %}
+        {% if not item.high_attention_count and not item.review_attention_count %}sem urgência temporal{% endif %}
+      </span>
+    </a>
+  {% else %}
+    <div class="empty card-empty">Nenhum tipo de item neste recorte.</div>
+  {% endfor %}
+</section>
+
+<section class="section-heading occurrences-heading">
+  <div><p class="eyebrow">Evidência detalhada</p><h2>Ocorrências</h2></div>
+  <span>Ordenadas pelo maior risco temporal</span>
+</section>
+<section class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Item</th><th>Quantidade</th><th>Risco</th><th>Coordenada</th>
+        <th>Local e caminho</th><th>Fonte</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in occurrences %}
+      <tr class="attention-row {{ row.attention_level }}">
+        <td><strong>{{ row.item_name }}</strong><span class="subline">ID {{ row.item_id }}</span></td>
+        <td class="quantity">{{ row.item_count }}</td>
+        <td>
+          <span class="attention {{ row.attention_level }}">{{ row.attention_label }}</span>
+          {% if row.stable_seconds is not none %}<span class="subline">{{ row.stable_seconds }} s</span>{% endif %}
+        </td>
+        <td class="mono">{{ row.tile_x }},{{ row.tile_y }},{{ row.tile_z }}</td>
+        <td>
+          <span class="path">{{ row.path }}</span>
+          <span class="tag">{% if row.container_index < 0 %}SOLTO{% else %}CONTAINER{% endif %}</span>
+          {% if row.container_index >= 0 %}<span class="subline">{{ row.container_name }} · {{ row.container_item_total }} unidade(s) deste tipo</span>{% endif %}
+        </td>
+        <td>
+          <span>#{{ row.recovery_source_session_id }}</span>
+          <span class="subline">snapshot {{ row.source_snapshot_updated_at or "desconhecido" }}</span>
+        </td>
+        <td><a href="/quarantine/{{ row.quarantine_id }}">Abrir tile</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">Nenhuma ocorrência neste recorte.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<nav class="pagination">
+  {% if page > 1 %}<a href="?source={{ source or '' }}&risk={{ risk }}&query={{ query }}&page={{ page - 1 }}">Anterior</a>{% endif %}
+  <span>Página {{ page }} de {{ pages }}</span>
+  {% if page < pages %}<a href="?source={{ source or '' }}&risk={{ risk }}&query={{ query }}&page={{ page + 1 }}">Próxima</a>{% endif %}
+</nav>
+{% endblock %}

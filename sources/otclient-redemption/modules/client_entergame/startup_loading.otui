@@ -1,0 +1,55 @@
+Panel
+  id: startupLoading
+  anchors.fill: parent
+  background-color: #020712b8
+  focusable: true
+
+  Panel
+    id: loadingCard
+    size: 520 150
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.verticalCenter: parent.verticalCenter
+    background-color: #08111fe8
+    border-width: 1
+    border-color: #8299b8aa
+
+    Label
+      id: title
+      anchors.top: parent.top
+      anchors.horizontalCenter: parent.horizontalCenter
+      margin-top: 22
+      text: Preparando o client
+      color: #f0f4ffff
+      font: verdana-11px-antialised
+      text-auto-resize: true
+
+    Label
+      id: description
+      anchors.top: prev.bottom
+      anchors.horizontalCenter: parent.horizontalCenter
+      margin-top: 10
+      text: Aguarde alguns segundos enquanto carregamos os arquivos.
+      color: #b8c4d6ff
+      font: verdana-11px-antialised
+      text-auto-resize: true
+
+    ProgressBar
+      id: progress
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: prev.bottom
+      margin-left: 35
+      margin-right: 35
+      margin-top: 18
+      height: 16
+      background-color: #4f79b8ff
+
+    Label
+      id: status
+      anchors.top: prev.bottom
+      anchors.horizontalCenter: parent.horizontalCenter
+      margin-top: 9
+      text: Iniciando...
+      color: #d3dbe8ff
+      font: verdana-11px-antialised
+      text-auto-resize: true

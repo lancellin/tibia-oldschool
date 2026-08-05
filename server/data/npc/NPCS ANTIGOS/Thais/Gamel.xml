@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<npc name="Gamel" script="Gamel.lua" walkinterval="2000" floorchange="0">
+	<health now="100" max="100" />
+	<look type="129" head="79" body="132" legs="115" feet="116" />
+	<parameters>
+		<parameter key="message_greet" value="Pssst! Be silent." />
+		<parameter key="message_farewell" value="Bye." />
+		<parameter key="message_walkaway" value="Bye." />
+	</parameters>
+</npc>

@@ -1,0 +1,39 @@
+MiniWindow
+  id: characterBonusesWindow
+  height: 120
+  @onOpen: modules.game_inventory.onCharacterBonusesWindowOpen()
+  @onClose: modules.game_inventory.onCharacterBonusesWindowClose()
+  &save: true
+
+  UIWidget
+    id: miniwindowIcon
+    anchors.top: miniwindowHeader.top
+    anchors.left: miniwindowHeader.left
+    margin-top: 2
+    margin-left: 4
+    image-source: /game_cyclopedia/images/monster-icon-bonuspoints
+    image-smooth: false
+
+  Label
+    id: miniwindowTitle
+    anchors.top: miniwindowHeader.top
+    anchors.left: miniwindowHeader.left
+    anchors.right: miniwindowHeader.right
+    margin-top: 2
+    margin-left: 20
+    margin-right: 50
+    font: verdana-11px-monochrome
+    height: 13
+    !text: tr('C. Bonus')
+    color: #9d9d9dff
+
+  MiniWindowContents
+    padding-left: 5
+    padding-right: 5
+    layout: verticalBox
+
+    Panel
+      id: characterBonusList
+      layout:
+        type: verticalBox
+        fit-children: true

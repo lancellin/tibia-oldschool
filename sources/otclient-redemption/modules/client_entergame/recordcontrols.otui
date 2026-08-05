@@ -1,0 +1,114 @@
+Panel
+  id: recordControls
+  size: 520 76
+  anchors.horizontalCenter: parent.horizontalCenter
+  anchors.top: gameMapPanel.top
+  margin-top: 8
+  background-color: #08111fe8
+  border-width: 1
+  border-color: #8299b8aa
+  focusable: false
+
+  Label
+    id: status
+    !text: tr('CAM playback')
+    anchors.left: parent.left
+    anchors.top: parent.top
+    margin-left: 10
+    margin-top: 6
+    color: #d3dbe8ff
+    text-auto-resize: true
+
+  Label
+    id: time
+    text: 00:00:00 / 00:00:00
+    anchors.right: parent.right
+    anchors.top: parent.top
+    margin-right: 10
+    margin-top: 6
+    color: #d3dbe8ff
+    text-auto-resize: true
+
+  ProgressBar
+    id: progress
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: status.bottom
+    margin-left: 10
+    margin-right: 10
+    margin-top: 5
+    height: 12
+    background-color: #4f79b8ff
+
+  Panel
+    id: controls
+    size: 497 20
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.bottom: parent.bottom
+    margin-bottom: 6
+    layout:
+      type: horizontalBox
+      spacing: 4
+
+    QtButton
+      id: rewind
+      !text: tr('-10s')
+      !tooltip: tr('Rewind 10 seconds')
+      size: 60 20
+      @onClick: CamList.seek(-10)
+
+    QtButton
+      id: rewindSmall
+      !text: tr('-2s')
+      !tooltip: tr('Rewind 2 seconds')
+      size: 48 20
+      @onClick: CamList.seek(-2)
+
+    QtButton
+      id: pause
+      !text: tr('Pause')
+      size: 70 20
+      @onClick: CamList.togglePause()
+
+    QtButton
+      id: forwardSmall
+      !text: tr('+2s')
+      !tooltip: tr('Advance 2 seconds')
+      size: 48 20
+      @onClick: CamList.seek(2)
+
+    QtButton
+      id: forward
+      !text: tr('+10s')
+      !tooltip: tr('Advance 10 seconds')
+      size: 60 20
+      @onClick: CamList.seek(10)
+
+    QtButton
+      id: speedDown
+      !text: tr('-')
+      !tooltip: tr('Reduce playback speed')
+      size: 28 20
+      @onClick: CamList.changeSpeed(-1)
+
+    Label
+      id: speed
+      text: 1x
+      width: 55
+      height: 20
+      text-align: center
+      color: #ffffffff
+
+    QtButton
+      id: speedUp
+      !text: tr('+')
+      !tooltip: tr('Increase playback speed')
+      size: 28 20
+      @onClick: CamList.changeSpeed(1)
+
+    QtButton
+      id: hideControls
+      !text: tr('Hide UI')
+      !tooltip: tr('Hide CAM interface (Ctrl+Shift+H)')
+      size: 68 20
+      @onClick: CamList.toggleControls()

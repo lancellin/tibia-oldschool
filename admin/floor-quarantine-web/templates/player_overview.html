@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Jogadores relacionados — Quarentena{% endblock %}
+{% block content %}
+<section class="heading">
+  <div>
+    <p class="eyebrow">Investigação por personagem</p>
+    <h1>Jogadores relacionados</h1>
+    <p class="lede">O nome indica o último manipulador registrado. É uma pista para localizar a CAM, não uma prova de propriedade ou duplicação.</p>
+  </div>
+  <a class="button secondary" href="/">Voltar aos itens</a>
+</section>
+
+<section class="metrics">
+  <article><span>Jogadores identificados</span><strong>{{ coverage.player_count or 0 }}</strong></article>
+  <article><span>Pilhas atribuídas</span><strong>{{ coverage.attributed_stacks or 0 }}</strong></article>
+  <article><span>Sem atribuição</span><strong>{{ coverage.unassigned_stacks or 0 }}</strong></article>
+  <article><span>Cobertura por GUID</span><strong>{{ coverage.coverage_percent or 0 }}%</strong></article>
+</section>
+
+<form class="filters" method="get" action="/players">
+  <label>Fonte
+    <input name="source" type="number" min="1" value="{{ source or '' }}" placeholder="Todas">
+  </label>
+  <label>Risco temporal
+    <select name="risk">
+      <option value="">Todos</option>
+      <option value="high" {% if risk == "high" %}selected{% endif %}>Atenção: 0–80 s</option>
+      <option value="review" {% if risk == "review" %}selected{% endif %}>Revisar: 81–299 s</option>
+      <option value="stable" {% if risk == "stable" %}selected{% endif %}>Estável: 5+ min</option>
+      <option value="unknown" {% if risk == "unknown" %}selected{% endif %}>Tempo desconhecido</option>
+    </select>
+  </label>
+  <label class="grow">Buscar jogador, GUID, item ou ID
+    <input name="query" value="{{ query }}" placeholder="Ex.: Lancellin, gold coin ou 2148">
+  </label>
+  <button class="button" type="submit">Aplicar</button>
+  {% if source or risk or query %}<a class="button secondary" href="/players">Limpar</a>{% endif %}
+</form>
+
+<section class="legend">
+  <span class="attention high">0–80 s: atenção</span>
+  <span class="attention review">81–299 s: revisar</span>
+  <span class="attention stable">5+ min: sinal temporal baixo</span>
+  <span class="attention unknown">sem horário</span>
+</section>
+
+<section class="panel">
+  <table class="players-table">
+    <thead>
+      <tr>
+        <th>Jogador relacionado</th><th>Unidades</th><th>Pilhas</th><th>Tipos</th>
+        <th>Tiles</th><th>Risco temporal</th><th>Escopo</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for player in players %}
+      <tr class="{% if player.high_attention_count %}row-attention{% endif %}">
+        <td>
+          <a class="player-link {% if player.is_unassigned %}unassigned{% endif %}" href="/players/{{ player.last_actor_guid }}">
+            <strong>{{ player.actor_name }}</strong>
+            {% if player.last_actor_guid %}<span>GUID #{{ player.last_actor_guid }}</span>{% else %}<span>Snapshots antigos ou sem evidência</span>{% endif %}
+          </a>
+        </td>
+        <td class="quantity">{{ player.total_units }}</td>
+        <td>{{ player.stack_count }}</td>
+        <td>{{ player.item_type_count }}</td>
+        <td>{{ player.tile_count }}</td>
+        <td class="attention-summary">
+          {% if player.high_attention_count %}<span class="attention high">{{ player.high_attention_count }} atenção</span>{% endif %}
+          {% if player.review_attention_count %}<span class="attention review">{{ player.review_attention_count }} revisar</span>{% endif %}
+          {% if player.stable_count %}<span class="attention stable">{{ player.stable_count }} estável</span>{% endif %}
+          {% if player.unknown_time_count %}<span class="attention unknown">{{ player.unknown_time_count }} sem horário</span>{% endif %}
+        </td>
+        <td>
+          <span>{{ player.source_count }} fonte(s)</span>
+          <span class="subline">{{ player.stacks_in_containers }} pilha(s) em container</span>
+          <span class="subline">{{ player.newest_update or "snapshot desconhecido" }}</span>
+        </td>
+        <td><a href="/players/{{ player.last_actor_guid }}">Investigar</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">Nenhum jogador ou item encontrado para esses filtros.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -1,0 +1,84 @@
+CamWidget < UIWidget
+  height: 20
+  background-color: alpha
+  &updateOnStates: |
+    function(self)
+      local children = self:getChildren()
+      for i = 1, #children do
+        children[i]:setOn(self:isFocused())
+      end
+    end
+  @onFocusChange: self:updateOnStates()
+  @onSetup: self:updateOnStates()
+
+  $focus:
+    background-color: #ffffff22
+
+  Label
+    id: name
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 5
+    margin-right: 5
+    color: #aaaaaa
+
+    $on:
+      color: #ffffff
+
+MainWindow
+  id: camListWindow
+  !text: tr('CAM Recordings')
+  size: 460 310
+  visible: false
+  @onEnter: CamList.play()
+  @onEscape: CamList.hide(true)
+  @onSetup: |
+    g_keyboard.bindKeyPress('Up', function() self:getChildById('camList'):focusPreviousChild(KeyboardFocusReason) end, self)
+    g_keyboard.bindKeyPress('Down', function() self:getChildById('camList'):focusNextChild(KeyboardFocusReason) end, self)
+
+  TextList
+    id: camList
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: camListScrollBar.left
+    anchors.bottom: buttonPlay.top
+    margin-bottom: 8
+    padding: 1
+    focusable: false
+    vertical-scrollbar: camListScrollBar
+    auto-focus: first
+
+  VerticalScrollBar
+    id: camListScrollBar
+    anchors.top: parent.top
+    anchors.bottom: buttonPlay.top
+    anchors.right: parent.right
+    margin-bottom: 8
+    step: 20
+    pixels-scroll: true
+
+  Label
+    id: emptyLabel
+    !text: tr('No local recordings found.')
+    anchors.horizontalCenter: camList.horizontalCenter
+    anchors.verticalCenter: camList.verticalCenter
+    color: #aaaaaa
+    visible: false
+
+  QtButton
+    id: buttonPlay
+    !text: tr('Play')
+    width: 80
+    anchors.right: buttonCancel.left
+    anchors.bottom: parent.bottom
+    margin-right: 10
+    @onClick: CamList.play()
+
+  QtButton
+    id: buttonCancel
+    !text: tr('Cancel')
+    width: 80
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    @onClick: CamList.hide(true)

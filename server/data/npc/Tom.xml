@@ -1,0 +1,10 @@
+﻿<npc pushable="0" name="Tom" script="Tom.lua" floorchange="0" walkinterval="1500" speed="100">
+	<health now="100" max="100"/>
+	<look type="129" head="113" body="115" legs="58" feet="115"/>
+	<parameters>
+<parameter key="module_keywords" value="1"/>
+<parameter key="message_greet" value="I'm Tom the Tanner. How can I help you |PLAYERNAME|?" />
+<parameter key="message_farewell" value="Good hunting, child." />
+<parameter key="message_needmoney" value="Sorry, you do not have so many." />
+	</parameters>
+</npc>

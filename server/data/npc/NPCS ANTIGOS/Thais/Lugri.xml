@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<npc name="Lugri" script="default.lua" walkinterval="2000" floorchange="0">
+	<health now="100" max="100" />
+	<look type="130" head="19" body="86" legs="87" feet="95" addons="0" />
+	<parameters>
+		<parameter key="message_greet" value="What is it that you want, |PLAYERNAME|?" />
+		<parameter key="message_farewell" value="Farewell." />
+		<parameter key="message_walkaway" value="Farewell." />
+		<parameter key="module_keywords" value="1" />
+		<parameter key="keywords" value="job;name;king;life;mission,quest;fight;help;people;time;monsters;pits of inferno;excalibug;necromants nectar" />
+		<parameter key="keyword_reply1" value="I am a priest of Zathroth, the bringer of dark secrets." />
+		<parameter key="keyword_reply2" value="My name is Lugri." />
+		<parameter key="keyword_reply3" value="This puny king is no threat for our master's plans." />
+		<parameter key="keyword_reply4" value="Life is war. It's about survival of the fittest." />
+		<parameter key="keyword_reply5" value="Aren't we all on a quest for survival and supremacy?" />
+		<parameter key="keyword_reply6" value="Life is an eternal fight!" />
+		<parameter key="keyword_reply7" value="If you cant help yourself you are not worth of my assistance." />
+		<parameter key="keyword_reply8" value="The people of Tibia are sheep, so be smart and strong enough to become their wolf." />
+		<parameter key="keyword_reply9" value="Who cares?" />
+		<parameter key="keyword_reply10" value="They are a challenge to sift the chaff from the wheat." />
+		<parameter key="keyword_reply11" value="After the ruthless seven conquered it, it's again a holy place for the followers of the dark path." />
+		<parameter key="keyword_reply12" value="It's existence is just a lie to inspire hope and bravery in the hearts of the followers of good." />
+		<parameter key="keyword_reply13" value="That's none of your business!" />
+	</parameters>
+</npc>

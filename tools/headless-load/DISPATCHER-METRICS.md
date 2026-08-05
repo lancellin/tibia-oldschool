@@ -1,0 +1,136 @@
+# Métricas do Dispatcher: login e logout
+
+## Inicialização
+
+Com o TFS fechado, execute:
+
+```powershell
+.\tools\headless-load\Start-TfsDispatcherMetrics.cmd
+```
+
+O launcher cria um CSV em:
+
+```text
+performance-results\dispatcher\<data>-dispatcher.csv
+```
+
+As métricas são agregadas em janelas de cinco segundos. Não existe log por
+item, jogador ou tarefa individual. A escrita do CSV ocorre em uma thread
+separada.
+
+## Indicadores gerais
+
+- `task_max_us`: maior tarefa individual executada pelo Dispatcher.
+- `queue_wait_max_us`: maior tempo que uma tarefa esperou antes de executar.
+- `queue_depth_max`: maior quantidade de tarefas aguardando.
+- `batch_max_us`: maior duração de um lote completo do Dispatcher.
+- `dispatcher_busy_pct`: percentual da janela consumido executando tarefas.
+- `login_*`: duração total dos `ProtocolGame::login` executados na janela.
+
+Cada fase de login e logout possui:
+
+- `_count`: quantidade de execuções;
+- `_total_us`: tempo acumulado;
+- `_avg_us`: média;
+- `_p95_us` e `_p99_us`: percentis aproximados por histograma;
+- `_max_us`: maior execução.
+
+## Fases do login
+
+- `login_preload`: consulta inicial usada para identificar o personagem.
+- `login_policy`: bloqueios, bans, fila e demais validações.
+- `login_full_load`: carregamento completo, incluindo todas as subfases abaixo.
+- `login_player_row_query`: consulta da linha principal do personagem.
+- `login_load_core`: conta, atributos básicos, condições e skills.
+- `login_load_social`: guild e magias aprendidas.
+- `login_load_inventory`: inventário e árvore de containers.
+- `login_inventory_query`: `SELECT` e recebimento das linhas de inventário.
+- `login_inventory_decode`: criação dos itens e desserialização dos atributos.
+- `login_inventory_attach`: montagem de slots, backpacks e subcontainers.
+- `login_load_locker`: lockers.
+- `login_load_depot`: depot chests.
+- `login_load_storage`: storages.
+- `login_load_charms`: Bestiary/charms.
+- `login_load_vip`: lista VIP.
+- `login_load_finalize`: peso, velocidade e luz dos itens.
+- `login_place_creature`: inserção no mapa e notificações iniciais.
+- `login_post_place`: eventos do client, CAM, charms e estado final do protocolo.
+- `login_vip_notify`: busca de jogadores que devem receber mudança de VIP.
+
+`login_full_load` contém as fases `login_load_*`; não some o total com as
+subfases, pois isso contaria o mesmo tempo duas vezes.
+
+## Fases do logout
+
+- `logout_accepted_total`: logout aceito pelo protocolo até o fim da remoção.
+- `logout_remove_creature_total`: remoção completa do jogador do mundo.
+- `logout_map_remove_notify`: espectadores, remoção do tile e pacotes visuais.
+- `logout_callbacks`: callbacks de remoção; contém cleanup e save.
+- `logout_final_detach`: retirada das listas, referências e summons.
+- `logout_cleanup`: trade, party, chat e guild.
+- `logout_online_status`: atualização de `players_online`.
+- `logout_async_snapshot_build`: construção completa do snapshot imutável no Dispatcher.
+- `logout_async_statements_finalize`: finalização/cópia do lote de instruções SQL coletadas.
+- `logout_async_prepare_handoff`: espera pelo canal e confirmação durável do PREPARE no serviço. Esta fase agora roda no worker e não compõe `dispatcher_busy_pct`.
+- `logout_save_total`: salvamento completo do personagem.
+- `logout_save_checkpoint`: caminho de checkpoint coordenado, quando aplicável.
+- `logout_save_transaction_begin`: início da transação comum.
+- `logout_save_core`: linha principal do personagem e condições.
+- `logout_save_spells`: magias aprendidas.
+- `logout_save_inventory`: inventário e containers.
+- `logout_inventory_prepare`: estado dos containers e lista de raízes.
+- `logout_inventory_delete`: `DELETE` das linhas antigas.
+- `logout_inventory_serialize`: serialização dos atributos dos itens.
+- `logout_inventory_build_rows`: escape dos blobs e montagem das linhas SQL.
+- `logout_inventory_insert`: execução do `INSERT`.
+- `logout_save_depot`: locker e depot, quando sujos.
+- `logout_save_storage`: storages.
+- `logout_save_commit`: commit da transação comum.
+- `logout_vip_notify`: busca de jogadores que devem receber mudança de VIP.
+
+Os totais de logout também se sobrepõem às subfases. Use as subfases para
+explicar o total, não para somar todos os campos indiscriminadamente.
+
+## Instrumentação removida
+
+As medições internas de movimento e espectadores foram removidas depois de
+confirmado que não eram gargalo. `Map::moveCreature` voltou a executar sem
+cronômetros ou registros adicionais.
+
+## Teste controlado com 100 personagens pesados
+
+Abra o TFS com o launcher de burst apenas no ambiente local:
+
+```powershell
+.\tools\headless-load\Start-TfsDispatcherBurstTest.cmd
+```
+
+Em outro terminal, execute:
+
+```powershell
+D:\tibia-dev-tools\Python312\python.exe `
+  .\tools\headless-load\headless_load.py `
+  --host 127.0.0.1 `
+  --port 7172 `
+  --count 100 `
+  --account-start 100001 `
+  --start-index 1 `
+  --profile idle `
+  --duration 90 `
+  --batch-size 100 `
+  --batch-delay 0 `
+  --login-concurrency 100 `
+  --login-admission-delay 0 `
+  --login-timeout 120 `
+  --keepalive-interval 4 `
+  --stop-batch-size 100 `
+  --stop-batch-delay 0 `
+  --output-dir .\performance-results\headless-load
+```
+
+Esse cenário mede um burst de 100 logins e, após 90 segundos, um pedido de
+logout para os 100 personagens. Aguarde todos saírem e encerre o TFS de forma
+controlada para garantir o flush final do CSV.
+
+O launcher de burst define `TFS_LOAD_TEST_BYPASS_CONNECTION_THROTTLE=1`.
+Nunca o use em produção ou exponha esse processo ao público.

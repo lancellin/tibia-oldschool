@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<spawns>
+	<spawn centerx="1015" centery="1018" centerz="7" radius="1">
+		<monster name="bug" x="0" y="0" z="7" spawntime="60" />
+		<monster name="bear" x="-1" y="1" z="7" spawntime="60" />
+		<monster name="bug" x="1" y="1" z="7" spawntime="60" />
+	</spawn>
+	<spawn centerx="32384" centery="32217" centerz="7" radius="1">
+		<npc name="Oswald" x="0" y="0" z="7" spawntime="60" direction="2" />
+	</spawn>
+	<spawn centerx="32408" centery="32170" centerz="7" radius="1">
+		<npc name="Gamon" x="0" y="0" z="7" spawntime="60" direction="2" />
+	</spawn>
+	<spawn centerx="32387" centery="32230" centerz="7" radius="1">
+		<npc name="Donald McRonald" x="0" y="0" z="7" spawntime="60" direction="2" />
+	</spawn>
+	<spawn centerx="32343" centery="32183" centerz="7" radius="1">
+		<npc name="Harkath Bloodblade" x="0" y="-1" z="7" spawntime="60" direction="2" />
+	</spawn>
+	<spawn centerx="32334" centery="32199" centerz="7" radius="1">
+		<npc name="Lynda" x="0" y="0" z="7" spawntime="60" direction="2" />
+	</spawn>
+</spawns>

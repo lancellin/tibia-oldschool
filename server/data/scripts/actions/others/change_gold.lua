@@ -1,0 +1,3 @@
+-- Intentionally disabled.
+-- Currency conversion by right-click is removed for this project.
+-- Future currency compression will happen through a dedicated in-game item/system.

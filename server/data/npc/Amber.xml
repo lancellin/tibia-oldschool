@@ -1,0 +1,12 @@
+﻿<npc pushable="0" name="Amber" script="Amber.lua" floorchange="0" walkinterval="1500" speed="100">
+	<health now="100" max="100"/>
+	<look type="137" head="59" body="113" legs="132" feet="76"/>
+	<parameters>
+<parameter key="module_keywords" value="1"/>
+<parameter key="message_greet" value="Oh hello, nice to see you |PLAYERNAME|."/>
+<parameter key="message_placedinqueue" value="Sorry, I'm already talking to someone."/>
+<parameter key="message_walkaway" value="See you later."/>
+<parameter key="message_farewell" value="See you later."/>
+<parameter key="message_idletimeout" value="See you later."/>
+	</parameters>
+</npc>

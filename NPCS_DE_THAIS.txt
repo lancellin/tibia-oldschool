@@ -1,0 +1,154 @@
+NPCs de Thais
+
+Lista funcional dos NPCs separados como pertencentes a Thais no projeto.
+O texto abaixo descreve o papel aparente de cada NPC no jogo.
+
+A Prisoner
+- Função: NPC de quest/evento.
+- Faz: conversa relacionada a aprisionamento e progressao de quest.
+- Observacao: nao e comerciante.
+
+Aruda
+- Função: NPC de quest/lore.
+- Faz: interage em contexto narrativo e de progressao.
+- Observacao: nao e comerciante.
+
+Baxter
+- Função: NPC de quest/comercio localizado.
+- Faz: interage em missao e possivelmente troca de itens/servico especifico.
+- Observacao: nao e comerciante geral.
+
+Benjamin
+- Função: postal/mail supplier.
+- Faz: vende suprimentos de correio.
+- Itens principais: label, letter, parcel.
+
+Captain Bluebear
+- Função: travel NPC.
+- Faz: oferece viagens por barco para destinos costeiros.
+
+Chester Kahs
+- Função: NPC de quest/evento.
+- Faz: serve como gatilho de progresso e dialogo especial.
+- Observacao: nao e comerciante geral.
+
+Donald McRonald
+- Função: food seller.
+- Faz: vende comida basica.
+- Itens principais: meat, ham, dragon ham, brown mushroom.
+
+Elane
+- Função: NPC de quest/lore.
+- Faz: interacao narrativa e possivel quest ligada a Thais.
+
+Frodo
+- Função: food seller.
+- Faz: vende alimentos basicos.
+- Itens principais: bread, ham, cheese, meat.
+
+Galuna
+- Função: NPC de quest/lore.
+- Faz: interacao narrativa ou de acesso a conteudo especifico.
+
+Gamel
+- Função: NPC de quest/lore.
+- Faz: interacao de historia/quest.
+
+Gamon
+- Função: NPC de quest/lore.
+- Faz: interacao de historia/quest.
+
+Gorn
+- Função: general store / tools.
+- Faz: vende ferramentas, mochila e utilitarios.
+- Itens principais: backpacks, bag, rope, shovel, pick, torch, fishing rod, machete, books, scrolls, parcel, document, plate, present.
+
+Grof, The Guard
+- Função: guarda/NPC de ambiente.
+- Faz: papel de ambientacao e vigilancia.
+- Observacao: nao e comerciante.
+
+Hanna
+- Função: NPC de quest/lore.
+- Faz: dialogo narrativo ou de acesso a tarefa.
+
+Harkath Bloodblade
+- Função: NPC de quest/lore.
+- Faz: interacao ligada a personagem importante e progressao.
+
+King Tibianus
+- Função: rei / quest NPC.
+- Faz: governa dialogo de historia, acesso e possiveis recompensas de quest.
+- Observacao: nao e comerciante.
+
+Kulag, The Guard
+- Função: guarda/NPC de ambiente.
+- Faz: papel de vigilancia e ambientacao.
+
+Lugri
+- Função: NPC de quest/lore.
+- Faz: interacao narrativa.
+
+Lynda
+- Função: NPC de quest/lore.
+- Faz: interacao narrativa ou acesso a tarefa.
+
+Oswald
+- Função: NPC de quest/lore.
+- Faz: dialogo relacionado a historia/quest.
+
+Partos
+- Função: NPC de quest/lore.
+- Faz: interacao narrativa.
+
+Quentin
+- Função: NPC de quest/lore.
+- Faz: interacao importante de quest/servico especial.
+
+Quero
+- Função: NPC de quest/lore.
+- Faz: dialogo de progressao.
+
+Sam
+- Função: blacksmith.
+- Faz: compra e vende equipamentos basicos de combate.
+- Itens principais: axe, battle axe, battle hammer, brass armor, chain armor, chain helmet, chain legs, dagger, hand axe, halberd, leather armor, leather helmet, mace, rapier, sabre, spear, steel helmet, steel shield, sword, wooden shield.
+
+Sherry Mcronald
+- Função: food seller / tavern NPC.
+- Faz: vende comida e mantimentos basicos.
+
+Suzy
+- Função: NPC de quest/lore.
+- Faz: interacao narrativa.
+
+Tim, The Guard
+- Função: guarda/NPC de ambiente.
+- Faz: vigilancia e ambientacao.
+
+Topsy
+- Função: NPC de quest/lore.
+- Faz: dialogo de historia/quest.
+
+Turvy
+- Função: NPC de quest/lore.
+- Faz: dialogo de historia/quest.
+
+Walter, The Guard
+- Função: guarda/NPC de ambiente.
+- Faz: vigilancia e ambientacao.
+
+wyat
+- Função: NPC de quest/lore.
+- Faz: interacao narrativa.
+
+Xodet
+- Função: magic supplies / basic rune seller.
+- Faz: vende suprimentos magicos basicos.
+- Itens principais: blank rune, life fluid, mana fluid, magic lightwand, spellbook.
+
+Resumo rapido
+- Comerciantes claros na lista: Benjamin, Donald McRonald, Frodo, Gorn, Sam e Xodet.
+- Captain Bluebear e um NPC de viagem.
+- A maior parte dos demais e NPC de quest, lore, guarda ou evento.
+- Alguns nomes podem existir somente na classificacao de cidade e nao ainda como XML no `server/data/npc`.

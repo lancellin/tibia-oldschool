@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<npc pushable="0" name="Account Clerk" script="account_clerk.lua" access="3" floorchange="0" walkinterval="0">
+	<health now="100" max="100"/>
+	<look type="128" head="57" body="59" legs="40" feet="76" addons="0"/>
+	<parameters>
+		<parameter key="message_greet" value="Welcome, |PLAYERNAME|. Say {account} to create a test account or {character} to create a character for the last account I created for you." />
+		<parameter key="message_farewell" value="Good bye." />
+		<parameter key="message_walkaway" value="Good bye." />
+		<parameter key="message_idletimeout" value="Good bye." />
+		<parameter key="idletime" value="120" />
+		<parameter key="talkradius" value="3" />
+	</parameters>
+</npc>

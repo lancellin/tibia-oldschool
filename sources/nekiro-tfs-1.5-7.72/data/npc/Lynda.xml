@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<npc name="Lynda" script="Lynda.lua" walkinterval="2000" floorchange="0">
+	<health now="150" max="150" />
+	<look type="138" head="79" body="82" legs="67" feet="114" addons="0" />
+	<parameters>
+		<parameter key="message_greet" value="Welcome in the name of the gods, pilgrim |PLAYERNAME|!" />
+		<parameter key="message_farewell" value="Good bye, |PLAYERNAME|. May the gods guard you, my child!" />
+	</parameters>
+</npc>

@@ -1,0 +1,12 @@
+Tibiantis spell sync report
+
+Local entries without Tibiantis match:
+- (none)
+
+Tibiantis entries without local match:
+- Instant: Desintegrate Spell (exito tera) (exito tera)
+- Instant: Discharge (exana vis) (exana vis)
+- Instant: Extinguish (exana flam) (exana flam)
+
+Conjuring scripts updated:
+- (none)

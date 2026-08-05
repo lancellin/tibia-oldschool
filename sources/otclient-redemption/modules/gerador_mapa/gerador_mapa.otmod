@@ -1,0 +1,9 @@
+Module
+  name: gerador_mapa
+  description: Gerador de Minimap OTMM Proprio
+  author: Developer
+  website: localhost
+  sandbox: true
+  scripts: [ gerador_mapa ]
+  @onLoad: init()
+  @onUnload: terminate()

@@ -1,0 +1,357 @@
+CharmMockCard < UICheckBox
+  size: 120 116
+  image-source: /images/ui/outfits/minipanel
+  image-border: 3
+  image-border-top: 22
+  color: #C0C0C0
+  text-offset: 0 3
+  text-align: top
+  border: 1 #454545
+  @onClick: modules.game_cyclopedia.Cyclopedia.selectCharm(self, self:isChecked())
+  $checked:
+    border: 2 white
+  $!checked:
+    border: 1 #454545
+  Label
+    id: CardName
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: parent.top
+    margin-top: 3
+    height: 14
+    text-align: center
+    text-auto-resize: false
+    color: #D6D6D6
+  BorderBox
+    id: CardIconBase
+    anchors.top: CardName.bottom
+    anchors.horizontalCenter: parent.horizontalCenter
+    margin-top: 8
+    image-source: /images/ui/panel_flat
+    image-border: 10
+    size: 50 50
+    phantom: true
+    UIWidget
+      id: CardIcon
+      size: 32 32
+      anchors.centerIn: parent
+      phantom: true
+  UIWidget
+    id: CardLockedMask
+    anchors.fill: CardIconBase
+    image-source: /images/ui/ditherpattern
+    opacity: 0.65
+    phantom: true
+  UIWidget
+    id: CardCostBase
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin-left: 7
+    margin-right: 7
+    margin-bottom: 6
+    height: 20
+    image-source: /images/ui/item
+    image-border: 10
+    phantom: true
+    Label
+      id: CardCostValue
+      anchors.centerIn: parent
+      margin-right: 8
+      color: #C0C0C0
+      !text: tr('0')
+      text-auto-resize: true
+    UIWidget
+      id: CharmIcon
+      anchors.left: CardCostValue.right
+      anchors.verticalCenter: parent.verticalCenter
+      margin-left: 2
+      image-source: /game_cyclopedia/images/icon_charms
+  UIWidget
+    id: CardStatusBar
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: CardCostBase.top
+    margin-left: 7
+    margin-right: 7
+    margin-bottom: 4
+    height: 16
+    background-color: #5d3434
+    Label
+      id: CardStatusLabel
+      anchors.centerIn: parent
+      color: #F0C2C2
+      text-auto-resize: true
+      !text: tr('Locked')
+
+UIWidget
+  id: Cat3
+  anchors.fill: parent
+  visible: false
+
+  SubPanel
+    id: LeftPanel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.bottom: parent.bottom
+    margin-top: 10
+    margin-bottom: 30
+    width: 215
+    !text: tr('Charm Details')
+
+    Label
+      id: SelectedName
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 24
+      margin-left: 8
+      margin-right: 8
+      height: 16
+      text-align: center
+      color: #F1F1F1
+      !text: tr('Charm')
+
+    BorderBox
+      id: ItemBase
+      anchors.top: SelectedName.bottom
+      anchors.horizontalCenter: parent.horizontalCenter
+      margin-top: 8
+      image-source: /images/ui/panel_flat
+      image-border: 10
+      size: 56 56
+      phantom: true
+      UIWidget
+        id: SelectedCharmIcon
+        size: 32 32
+        anchors.centerIn: parent
+        phantom: true
+      UIWidget
+        id: SelectedLockedMask
+        anchors.fill: parent
+        image-source: /images/ui/ditherpattern
+        opacity: 0.65
+        phantom: true
+
+    UIWidget
+      id: StatusRow
+      anchors.top: ItemBase.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 8
+      margin-left: 10
+      margin-right: 10
+      height: 14
+      Label
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        color: #AFAFAF
+        !text: tr('Status:')
+      Label
+        id: StatusValue
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        margin-left: 56
+        color: #C65C5C
+        text-align: right
+        !text: tr('Locked')
+
+    UIWidget
+      id: EffectRow
+      anchors.top: StatusRow.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 6
+      margin-left: 10
+      margin-right: 10
+      height: 30
+      Label
+        anchors.left: parent.left
+        anchors.top: parent.top
+        color: #AFAFAF
+        !text: tr('Effect:')
+      Label
+        id: EffectValue
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        margin-left: 44
+        color: #D2D2D2
+        text-wrap: true
+        !text: tr('Effect description')
+
+    UIWidget
+      id: ChanceRow
+      anchors.top: EffectRow.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 6
+      margin-left: 10
+      margin-right: 10
+      height: 14
+      Label
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        color: #AFAFAF
+        !text: tr('Chance:')
+      Label
+        id: ChanceValue
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        margin-left: 56
+        color: #D2D2D2
+        text-align: right
+        text: "0%"
+
+    UIWidget
+      id: AoeRow
+      anchors.top: ChanceRow.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 4
+      margin-left: 10
+      margin-right: 10
+      height: 14
+      Label
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        color: #AFAFAF
+        !text: tr('AoE Red.:')
+      Label
+        id: AoeValue
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        margin-left: 68
+        color: #D2D2D2
+        text-align: right
+        !text: tr('-')
+
+    UIWidget
+      id: UnlockCostRow
+      anchors.top: AoeRow.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 6
+      margin-left: 10
+      margin-right: 10
+      height: 20
+      image-source: /images/ui/item
+      image-border: 10
+      Label
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        margin-left: 8
+        color: #AFAFAF
+        !text: tr('Unlock Cost')
+      Label
+        id: UnlockCostValue
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        margin-left: 74
+        margin-right: 18
+        color: #E0E0E0
+        text-align: right
+        !text: tr('0')
+      UIWidget
+        anchors.left: UnlockCostValue.right
+        anchors.verticalCenter: parent.verticalCenter
+        margin-left: 2
+        image-source: /game_cyclopedia/images/icon_charms
+
+    Button
+      id: UnlockButton
+      size: 84 20
+      anchors.top: UnlockCostRow.bottom
+      anchors.horizontalCenter: parent.horizontalCenter
+      margin-top: 8
+      !text: tr('Unlock')
+      color: #C0C0C0
+      enabled: false
+      @onClick: modules.game_cyclopedia.Cyclopedia.actionCharmButton(self)
+
+    SubPanel
+      id: DescriptionPanel
+      anchors.top: UnlockButton.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      margin-top: 10
+      margin-left: 8
+      margin-right: 8
+      margin-bottom: 8
+      !text: tr('Description')
+      ScrollablePanel
+        id: DescriptionScroll
+        vertical-scrollbar: DescriptionScrollbar
+        anchors.fill: parent
+        margin-top: 22
+        margin-left: 6
+        margin-right: 16
+        margin-bottom: 6
+        layout: verticalBox
+        padding-left: 1
+        padding-right: 2
+        UIWidget
+          id: DescriptionText
+          width: 165
+          color: #CFCFCF
+          text-wrap: true
+          text-auto-resize: true
+          text-align: left
+          !text: tr('Charm description')
+      VerticalScrollBar
+        id: DescriptionScrollbar
+        anchors.top: DescriptionScroll.top
+        anchors.right: parent.right
+        anchors.bottom: DescriptionScroll.bottom
+        step: 40
+        pixel-scroll: true
+
+  BorderBox
+    id: GridBase
+    anchors.top: parent.top
+    anchors.left: LeftPanel.right
+    anchors.right: parent.right
+    anchors.bottom: LeftPanel.bottom
+    margin-top: 10
+    margin-left: 10
+    image-source: /images/ui/panel_flat
+    image-border: 10
+
+  Label
+    id: GridTitle
+    anchors.top: GridBase.top
+    anchors.horizontalCenter: GridBase.horizontalCenter
+    margin-top: 6
+    color: #D6D6D6
+    !text: tr('Available Charms')
+
+  UIScrollArea
+    id: CharmList
+    vertical-scrollbar: CharmListScrollbar
+    anchors.top: GridTitle.bottom
+    anchors.left: GridBase.left
+    anchors.right: GridBase.right
+    anchors.bottom: GridBase.bottom
+    margin-top: 8
+    margin-left: 8
+    margin-right: 16
+    margin-bottom: 8
+    padding-top: 2
+    layout:
+      type: grid
+      cell-size: 120 116
+      cell-spacing: 6
+      flow: true
+
+  VerticalScrollBar
+    id: CharmListScrollbar
+    anchors.top: CharmList.top
+    anchors.right: GridBase.right
+    anchors.bottom: CharmList.bottom
+    step: 80
+    pixel-scroll: true

@@ -1,0 +1,10 @@
+﻿<npc pushable="0" name="Seymour" script="Seymour.lua" floorchange="0" walkinterval="1500" speed="100">
+	<health now="100" max="100"/>
+	<look type="128" head="115" body="69" legs="87" feet="116"/>
+	<parameters>
+<parameter key="module_keywords" value="1"/>
+<parameter key="message_greet" value="Hello, |PLAYERNAME|. What do you need?" />
+<parameter key="message_farewell" value="Good bye! And remember: No running up and down in the academy!" />
+<parameter key="message_needmoney" value="" />
+	</parameters>
+</npc>

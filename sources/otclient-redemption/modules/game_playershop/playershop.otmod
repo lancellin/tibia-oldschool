@@ -1,0 +1,11 @@
+Module
+  name: game_playershop
+  description: Online player shop
+  author: Redemption
+  website: None
+  sandboxed: true
+  autoload: true
+  dependencies: [ client_styles, game_interface, game_mainpanel ]
+  scripts: [ playershop ]
+  @onLoad: init()
+  @onUnload: terminate()

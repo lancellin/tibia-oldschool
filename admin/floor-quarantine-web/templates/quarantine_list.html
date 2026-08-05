@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Tiles em quarentena{% endblock %}
+{% block content %}
+<section class="heading"><div><p class="eyebrow">Consulta técnica</p><h1>Tiles em quarentena</h1><p>{{ total }} registro(s)</p></div></section>
+<form class="filters" method="get">
+  <label>Fonte<input name="source" type="number" min="1" value="{{ source or '' }}"></label>
+  <label>Jogador
+    <select name="actor">
+      <option value="">Todos</option>
+      <option value="0" {% if actor == 0 %}selected{% endif %}>Sem atribuição</option>
+      {% for option in actors %}<option value="{{ option.last_actor_guid }}" {% if actor == option.last_actor_guid %}selected{% endif %}>{{ option.actor_name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Estado<select name="state_filter"><option value="">Todos</option><option value="PENDING" {% if state_filter == 'PENDING' %}selected{% endif %}>PENDING</option></select></label>
+  <label class="grow">Buscar item, jogador, identidade ou posição<input name="query" value="{{ query }}"></label>
+  <button class="button" type="submit">Filtrar</button>
+</form>
+<section class="panel">
+  <table>
+    <thead><tr><th>Fonte</th><th>Tile</th><th>Jogadores</th><th>Atenção</th><th>Itens</th><th>Manifesto</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr class="attention-row {{ row.attention_level }}">
+        <td>#{{ row.recovery_source_session_id }}</td>
+        <td class="mono">{{ row.tile_x }},{{ row.tile_y }},{{ row.tile_z }}</td>
+        <td>{{ row.actor_names or "Sem atribuição" }}</td>
+        <td><span class="attention {{ row.attention_level }}">{{ row.attention_label }}</span>{% if row.stable_seconds is not none %}<span class="subline">{{ row.stable_seconds }} s</span>{% endif %}</td>
+        <td>{{ row.quarantine_item_count + row.player_match_item_count }}</td>
+        <td>{{ row.manifest_quarantined }}/{{ row.manifest_items }}</td>
+        <td><span class="tag">{{ row.state }}</span></td>
+        <td><a href="/quarantine/{{ row.id }}">Inspecionar</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">Nenhum resultado.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+<nav class="pagination">
+  {% if page > 1 %}<a href="?source={{ source or '' }}&actor={{ actor if actor is not none else '' }}&state_filter={{ state_filter }}&query={{ query }}&page={{ page - 1 }}">Anterior</a>{% endif %}
+  <span>Página {{ page }} de {{ pages }}</span>
+  {% if page < pages %}<a href="?source={{ source or '' }}&actor={{ actor if actor is not none else '' }}&state_filter={{ state_filter }}&query={{ query }}&page={{ page + 1 }}">Próxima</a>{% endif %}
+</nav>
+{% endblock %}

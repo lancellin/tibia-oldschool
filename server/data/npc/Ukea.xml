@@ -1,0 +1,12 @@
+<npc name="Ukea" script="Ukea.lua" floorchange="0" walkinterval="1500" speed="100" pushable="0">
+	<health now="100" max="100"/>
+	<look type="144" head="78" body="58" legs="64" feet="58"/>
+	<parameters>
+		<parameter key="idletime" value="30"/>
+		<parameter key="message_greet" value="Ashari |PLAYERNAME|. Welcome to Ab'Dendriel Furniture Store."/>
+		<parameter key="message_placedinqueue" value="One moment please, |PLAYERNAME|."/>
+		<parameter key="message_walkaway" value="Good bye."/>
+		<parameter key="message_farewell" value="Asha Thrazi."/>
+		<parameter key="message_idletimeout" value="Asha Thrazi."/>
+	</parameters>
+</npc>

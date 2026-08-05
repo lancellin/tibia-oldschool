@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% macro render_nodes(nodes) %}
+<ul class="item-tree">
+{% for node in nodes %}
+  <li>
+    <details open>
+      <summary class="{% if node.item.is_quarantined %}quarantined{% else %}context{% endif %}">
+        <strong>{{ node.item.item_name }}</strong>
+        <span>ID {{ node.item.item_id }}{% if node.item.item_count > 1 %} × {{ node.item.item_count }}{% endif %}</span>
+        {% if node.item.is_quarantined %}<span class="tag danger">QUARENTENA</span>{% else %}<span class="tag">CONTEXTO</span>{% endif %}
+      </summary>
+      <div class="item-details">
+        <div><span>Política</span><code>{{ node.item.policy_state }}</code></div>
+        <div><span>Motivo</span>{{ node.item.reason_labels | join(", ") }}</div>
+        <div><span>Instance ID</span><code>{{ node.item.instance_id or "—" }}</code></div>
+        <div>
+          <span>Último jogador relacionado</span>
+          {% if node.item.last_actor_guid %}
+            <a href="/players/{{ node.item.last_actor_guid }}">{{ node.item.last_actor_name }}</a>
+            <code>#{{ node.item.last_actor_guid }}</code>
+          {% else %}Sem atribuição{% endif %}
+        </div>
+        <div><span>Caminho</span><code>#{{ node.item.source_item_index }} / profundidade {{ node.item.depth }}</code></div>
+        <div><span>Subtipo</span>{{ node.item.item_subtype }}</div>
+        <div><span>Container</span>{% if node.item.is_container %}sim, capacidade {{ node.item.container_capacity }}{% else %}não{% endif %}</div>
+        <div class="wide"><span>Look registrado</span><pre>{{ node.item.description }}</pre></div>
+      </div>
+      {% if node.children %}{{ render_nodes(node.children) }}{% endif %}
+    </details>
+  </li>
+{% endfor %}
+</ul>
+{% endmacro %}
+{% block title %}Quarentena #{{ quarantine.id }}{% endblock %}
+{% block content %}
+<section class="heading">
+  <div>
+    <p class="eyebrow">Fonte #{{ quarantine.recovery_source_session_id }}</p>
+    <h1>Tile {{ quarantine.tile_x }},{{ quarantine.tile_y }},{{ quarantine.tile_z }}</h1>
+    <p><span class="attention {{ quarantine.attention_level }}">{{ quarantine.attention_label }}</span></p>
+  </div>
+  <a class="button secondary" href="/quarantine?source={{ quarantine.recovery_source_session_id }}">Voltar</a>
+</section>
+<section class="metrics">
+  <article><span>Itens em quarentena</span><strong>{{ quarantine.quarantine_item_count + quarantine.player_match_item_count }}</strong></article>
+  <article><span>Itens no snapshot</span><strong>{{ quarantine.snapshot_item_count }}</strong></article>
+  <article><span>Margem antes do crash</span><strong class="small">{% if quarantine.stable_seconds is not none %}{{ quarantine.stable_seconds }} s{% else %}desconhecida{% endif %}</strong></article>
+  <article><span>Estado</span><strong class="small">{{ quarantine.state }}</strong></article>
+</section>
+<section class="panel tree-panel">
+  {% if tree %}
+    {{ render_nodes(tree) }}
+  {% else %}
+    <div class="empty">
+      <h2>Manifesto ainda não disponível</h2>
+      <p>O blob original permanece preservado. Este registro foi criado antes da versão que gera itens normalizados.</p>
+    </div>
+  {% endif %}
+</section>
+<section class="evidence">
+  <h2>Evidência original</h2>
+  <dl>
+    <div><dt>Checksum</dt><dd class="mono">{{ quarantine.checksum }}</dd></div>
+    <div><dt>Versão do tile</dt><dd>{{ quarantine.source_tile_version }}</dd></div>
+    <div><dt>Checkpoint do tile</dt><dd>{{ quarantine.source_checkpoint_group_id }}</dd></div>
+    <div><dt>Snapshot do tile</dt><dd>{{ quarantine.source_snapshot_updated_at or "desconhecido" }}</dd></div>
+    <div><dt>Último checkpoint da sessão</dt><dd>{{ quarantine.last_checkpoint_at or "desconhecido" }}</dd></div>
+    <div><dt>Quarentena criada</dt><dd>{{ quarantine.created_at }}</dd></div>
+  </dl>
+</section>
+{% endblock %}

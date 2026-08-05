@@ -1,0 +1,16 @@
+-- Execute como administrador do MariaDB depois de substituir host e senha.
+-- O painel não possui INSERT, UPDATE ou DELETE.
+
+CREATE USER IF NOT EXISTS 'floor_quarantine_reader'@'127.0.0.1'
+  IDENTIFIED BY 'SUBSTITUA_POR_UMA_SENHA_FORTE';
+
+GRANT SELECT ON `forgottenserver`.`floor_persistence_quarantine`
+  TO 'floor_quarantine_reader'@'127.0.0.1';
+GRANT SELECT ON `forgottenserver`.`floor_persistence_quarantine_items`
+  TO 'floor_quarantine_reader'@'127.0.0.1';
+GRANT SELECT ON `forgottenserver`.`floor_persistence_checkpoints`
+  TO 'floor_quarantine_reader'@'127.0.0.1';
+GRANT SELECT (`id`, `name`) ON `forgottenserver`.`players`
+  TO 'floor_quarantine_reader'@'127.0.0.1';
+
+FLUSH PRIVILEGES;

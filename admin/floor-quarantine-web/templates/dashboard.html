@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Itens em quarentena{% endblock %}
+{% block content %}
+<section class="heading">
+  <div>
+    <p class="eyebrow">Visão geral</p>
+    <h1>Itens em quarentena</h1>
+    <p class="lede">Comece pelo tipo do item, pelo jogador relacionado ou pelo risco temporal.</p>
+  </div>
+  <div class="heading-actions">
+    <a class="button" href="/players">Investigar jogadores</a>
+    <a class="button secondary" href="/quarantine">Ver todos os tiles</a>
+  </div>
+</section>
+<section class="metrics">
+  <article><span>Tiles registrados</span><strong>{{ totals.quarantine_rows or 0 }}</strong></article>
+  <article><span>Pendentes</span><strong>{{ totals.pending_rows or 0 }}</strong></article>
+  <article><span>Pilhas stackable</span><strong>{{ totals.stackable_items or 0 }}</strong></article>
+  <article><span>Correspondências</span><strong>{{ totals.player_matches or 0 }}</strong></article>
+</section>
+<form class="filters" method="get" action="/">
+  <label>Fonte da recuperação
+    <input name="source" type="number" min="1" value="{{ source or '' }}" placeholder="Todas">
+  </label>
+  <label class="actor-filter">Último jogador relacionado
+    <select name="actor">
+      <option value="">Todos</option>
+      <option value="0" {% if actor == 0 %}selected{% endif %}>Sem atribuição</option>
+      {% for option in actors %}
+        <option value="{{ option.last_actor_guid }}" {% if actor == option.last_actor_guid %}selected{% endif %}>
+          {{ option.actor_name }} — {{ option.stack_count }} pilha(s)
+        </option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="button" type="submit">Aplicar</button>
+  {% if source or actor is not none %}<a class="button secondary" href="/">Limpar filtros</a>{% endif %}
+</form>
+{% if selected_actor_name %}
+  <section class="active-filter">Mostrando somente evidências relacionadas a <strong>{{ selected_actor_name }}</strong>.</section>
+{% endif %}
+<section class="legend">
+  <span class="attention high">0–80 s: atenção</span>
+  <span class="attention review">81–299 s: revisar</span>
+  <span class="attention stable">5+ min: sinal temporal baixo</span>
+  <span class="attention unknown">sem horário</span>
+  <small>A margem usa o último checkpoint confirmado antes da queda, não o horário da reinicialização.</small>
+</section>
+<section class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Tipo de item</th><th>Unidades</th><th>Pilhas</th><th>Tiles</th>
+        <th>Jogadores</th><th>Proximidade do crash</th><th>Snapshot mais recente</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in item_types %}
+      <tr class="{% if item.high_attention_count %}row-attention{% endif %}">
+        <td>
+          <a class="item-link" href="/items/{{ item.item_id }}?{% if source %}source={{ source }}&{% endif %}{% if actor is not none %}actor={{ actor }}{% endif %}">
+            <strong>{{ item.item_name }}</strong><span>ID {{ item.item_id }}</span>
+          </a>
+          {% if item.stacks_in_containers %}<span class="subline">{{ item.stacks_in_containers }} pilha(s) em container</span>{% endif %}
+        </td>
+        <td class="quantity">{{ item.total_units }}</td>
+        <td>{{ item.stack_count }}</td>
+        <td>{{ item.tile_count }}</td>
+        <td class="actor-breakdown">
+          {% for related in item.actor_breakdown %}
+            {% if related.last_actor_guid %}
+              <a href="/players/{{ related.last_actor_guid }}">
+                {{ related.actor_name }}
+              </a>
+            {% else %}
+              <a class="muted" href="/players/0">Sem atribuição</a>
+            {% endif %}
+            <span class="subline">{{ related.total_units }} un. · {{ related.stack_count }} pilha(s)</span>
+          {% endfor %}
+          {% if item.actor_more_count %}<span class="subline">+ {{ item.actor_more_count }} jogador(es)</span>{% endif %}
+        </td>
+        <td class="attention-summary">
+          {% if item.high_attention_count %}<span class="attention high">{{ item.high_attention_count }} atenção</span>{% endif %}
+          {% if item.review_attention_count %}<span class="attention review">{{ item.review_attention_count }} revisar</span>{% endif %}
+          {% if item.stable_count %}<span class="attention stable">{{ item.stable_count }} estável</span>{% endif %}
+          {% if item.unknown_time_count %}<span class="attention unknown">{{ item.unknown_time_count }} sem horário</span>{% endif %}
+        </td>
+        <td>{{ item.newest_update or "—" }}</td>
+        <td><a href="/items/{{ item.item_id }}?{% if source %}source={{ source }}&{% endif %}{% if actor is not none %}actor={{ actor }}{% endif %}">Ver ocorrências</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">Nenhum item encontrado para esses filtros.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+<details class="sessions">
+  <summary>Ver fontes de recuperação</summary>
+  <section class="panel">
+    <table>
+      <thead><tr><th>Fonte</th><th>Tiles</th><th>Pendentes</th><th>Pilhas</th><th>Com jogador</th><th>Atualização</th></tr></thead>
+      <tbody>
+      {% for session in sessions %}
+        <tr>
+          <td><a href="/?source={{ session.recovery_source_session_id }}">#{{ session.recovery_source_session_id }}</a></td>
+          <td>{{ session.quarantine_rows }}</td><td>{{ session.pending_rows }}</td>
+          <td>{{ session.stackable_items }}</td><td>{{ session.player_matches }}</td>
+          <td>{{ session.last_updated_at }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="empty">Nenhuma quarentena registrada.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</details>
+{% endblock %}

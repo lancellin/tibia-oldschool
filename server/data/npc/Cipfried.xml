@@ -1,0 +1,8 @@
+﻿<npc pushable="0" name="Cipfried" script="Cipfried.lua" floorchange="0" walkinterval="1500" speed="100">
+	<health now="100" max="100"/>
+	<look type="57" head="0" body="0" legs="0" feet="0"/>
+	<parameters>
+<parameter key="module_keywords" value="1"/>
+<parameter key="message_farewell" value="Farewell, |PLAYERNAME|!" />
+	</parameters>
+</npc>

@@ -1,0 +1,317 @@
+PlayerShopSlot < UIItem
+  size: 34 34
+  virtual: true
+  draggable: false
+  focusable: true
+  always-show-count: true
+  image-source: /images/ui/item
+
+PlayerShopCreatureLabel < Label
+  id: playerShopLabel
+  width: 1
+  height: 18
+  color: #f5d76eff
+  background-color: #20202099
+  font: verdana-11px-rounded
+  text-align: center
+  text-wrap: true
+  padding: 2
+
+PlayerShopWindow < MainWindow
+  !text: tr('Player Shop')
+  size: 420 435
+  @onEscape: modules.game_playershop.closeWindow()
+
+  Label
+    id: descriptionLabel
+    !text: tr('Description:')
+    anchors.top: parent.top
+    anchors.left: parent.left
+    margin-top: 11
+    margin-left: 12
+    width: 72
+    height: 18
+
+  TextEdit
+    id: descriptionEdit
+    anchors.top: parent.top
+    anchors.left: descriptionLabel.right
+    anchors.right: parent.right
+    margin-top: 8
+    margin-left: 6
+    margin-right: 12
+    height: 22
+    text: description
+    max-length: 38
+
+  FlatPanel
+    id: slotsPanel
+    anchors.top: descriptionEdit.bottom
+    anchors.left: parent.left
+    anchors.right: slotsScrollBar.left
+    margin-top: 8
+    margin-left: 12
+    margin-right: 2
+    height: 188
+    padding: 3
+    image-source:
+    background-color: alpha
+    border-width: 1
+    border-color: #151515
+    layout:
+      type: grid
+      cell-size: 34 34
+      flow: true
+      cell-spacing: 3
+      num-columns: 9
+
+  VerticalScrollBar
+    id: slotsScrollBar
+    anchors.top: parent.top
+    anchors.right: parent.right
+    margin-top: 38
+    margin-right: 12
+    height: 188
+    step: 37
+    pixels-scroll: true
+    $!on:
+      width: 0
+
+  HorizontalSeparator
+    id: separator
+    anchors.top: slotsPanel.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 8
+    margin-left: 10
+    margin-right: 10
+
+  Label
+    id: selectedName
+    anchors.top: separator.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    margin-left: 12
+    width: 140
+    height: 18
+    color: #dddddd
+    text: Select an item
+
+  HorizontalScrollBar
+    id: amountScrollBar
+    anchors.top: selectedName.bottom
+    anchors.left: parent.left
+    width: 128
+    margin-top: 4
+    margin-left: 12
+    step: 1
+    minimum: 1
+    maximum: 1
+    value: 1
+    focusable: false
+
+  Label
+    id: selectedStats
+    anchors.top: amountLabel.bottom
+    anchors.left: parent.left
+    width: 128
+    margin-top: 2
+    margin-left: 12
+    height: 42
+    text-wrap: true
+
+  UIItem
+    id: selectedItem
+    virtual: true
+    draggable: false
+    always-show-count: true
+    anchors.top: amountScrollBar.top
+    anchors.left: selectedStats.right
+    margin-left: 10
+    size: 48 48
+    image-source: /images/ui/item
+
+  Label
+    id: amountLabel
+    !text: tr('Amount: 1x')
+    anchors.top: amountScrollBar.bottom
+    anchors.left: parent.left
+    margin-top: 6
+    margin-left: 12
+    width: 120
+    height: 18
+
+  ScrollableFlatPanel
+    id: itemDescriptionPanel
+    anchors.top: amountScrollBar.top
+    anchors.left: selectedItem.right
+    anchors.right: descriptionScrollBar.left
+    anchors.bottom: footerSeparator.top
+    margin-left: 10
+    margin-right: 2
+    margin-bottom: 16
+    padding: 4
+    vertical-scrollbar: descriptionScrollBar
+    image-source:
+    background-color: alpha
+    border-width-top: 1
+    border-color-top: black
+    border-width-left: 1
+    border-color-left: black
+    border-width-bottom: 1
+    border-color-bottom: #747474
+    border-width-right: 1
+    border-color-right: #747474
+
+    Label
+      id: selectedDescription
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: 80
+      text-wrap: true
+
+  VerticalScrollBar
+    id: descriptionScrollBar
+    anchors.top: amountScrollBar.top
+    anchors.right: parent.right
+    anchors.bottom: footerSeparator.top
+    margin-right: 12
+    margin-bottom: 16
+    step: 14
+    pixels-scroll: true
+    $!on:
+      width: 0
+
+  Button
+    id: buyButton
+    !text: tr('Buy')
+    anchors.top: selectedItem.bottom
+    anchors.left: selectedItem.left
+    margin-top: 2
+    size: 48 20
+    @onClick: modules.game_playershop.buySelected()
+
+  HorizontalSeparator
+    id: footerSeparator
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin-left: 12
+    margin-right: 12
+    margin-bottom: 27
+
+  FlatPanel
+    id: goldPanel
+    anchors.left: parent.left
+    anchors.bottom: parent.bottom
+    margin-left: 12
+    margin-bottom: 2
+    size: 138 20
+    image-source: /images/ui/item
+    image-border: 10
+
+    Label
+      id: goldLabel
+      anchors.right: goldIcon.left
+      anchors.verticalCenter: parent.verticalCenter
+      margin-right: 4
+      width: 96
+      height: 18
+      text-align: right
+      color: #BDBDBD
+      text: 0
+
+    UIItem
+      id: goldIcon
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      margin-right: 5
+      size: 26 26
+      virtual: true
+      item-id: 3031
+
+  Button
+    id: confirmButton
+    !text: tr('Open store')
+    anchors.right: cancelButton.left
+    anchors.bottom: parent.bottom
+    margin-right: 8
+    margin-bottom: 1
+    size: 90 22
+    @onClick: modules.game_playershop.confirmStore()
+
+  Button
+    id: cancelButton
+    !text: tr('Cancel')
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin-right: 12
+    margin-bottom: 1
+    size: 70 22
+    @onClick: modules.game_playershop.cancelStore()
+
+PlayerShopPriceWindow < MainWindow
+  !text: tr('List item')
+  size: 240 160
+  @onEscape: self:destroy()
+
+  Label
+    id: priceLabel
+    !text: tr('Unit price:')
+    anchors.top: parent.top
+    anchors.left: parent.left
+    margin-top: 12
+    margin-left: 12
+    width: 80
+    height: 18
+
+  TextEdit
+    id: priceEdit
+    anchors.top: parent.top
+    anchors.left: priceLabel.right
+    anchors.right: parent.right
+    margin-top: 10
+    margin-left: 8
+    margin-right: 12
+    height: 22
+    text: 1
+
+  Label
+    id: countLabel
+    !text: tr('Amount:')
+    anchors.top: priceEdit.bottom
+    anchors.left: parent.left
+    margin-top: 12
+    margin-left: 12
+    width: 80
+    height: 18
+
+  TextEdit
+    id: countEdit
+    anchors.top: priceEdit.bottom
+    anchors.left: countLabel.right
+    anchors.right: parent.right
+    margin-top: 10
+    margin-left: 8
+    margin-right: 12
+    height: 22
+    text: 1
+
+  Button
+    id: okButton
+    !text: tr('OK')
+    anchors.right: cancelButton.left
+    anchors.bottom: parent.bottom
+    margin-right: 8
+    margin-bottom: 12
+    size: 70 24
+
+  Button
+    id: cancelButton
+    !text: tr('Cancel')
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin-right: 12
+    margin-bottom: 12
+    size: 70 24

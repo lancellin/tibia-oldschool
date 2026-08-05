@@ -1,0 +1,36 @@
+param(
+    [ValidateRange(1000, 60000)]
+    [int]$IntervalMilliseconds = 5000
+)
+
+$ErrorActionPreference = "Stop"
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$serverDirectory = Join-Path $root "server"
+$tfsExecutable = Join-Path $serverDirectory "tfs.exe"
+$resultDirectory = Join-Path $root "performance-results\dispatcher"
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$metricsPath = Join-Path $resultDirectory "$timestamp-dispatcher.csv"
+
+if (-not (Test-Path -LiteralPath $tfsExecutable -PathType Leaf)) {
+    throw "TFS executable not found: $tfsExecutable"
+}
+
+New-Item -ItemType Directory -Path $resultDirectory -Force | Out-Null
+$env:TFS_DISPATCHER_METRICS_PATH = $metricsPath
+$env:TFS_DISPATCHER_METRICS_INTERVAL_MS = $IntervalMilliseconds.ToString()
+$env:TFS_LOAD_TEST_BYPASS_CONNECTION_THROTTLE = "1"
+
+Write-Host "Dispatcher metrics: $metricsPath"
+Write-Warning "LOAD TEST MODE: the per-IP connection throttle is disabled only for this TFS process."
+Write-Host "Closing this process restores the normal protection automatically."
+
+Push-Location $serverDirectory
+try {
+    & $tfsExecutable
+}
+finally {
+    Pop-Location
+    Remove-Item Env:TFS_DISPATCHER_METRICS_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:TFS_DISPATCHER_METRICS_INTERVAL_MS -ErrorAction SilentlyContinue
+    Remove-Item Env:TFS_LOAD_TEST_BYPASS_CONNECTION_THROTTLE -ErrorAction SilentlyContinue
+}

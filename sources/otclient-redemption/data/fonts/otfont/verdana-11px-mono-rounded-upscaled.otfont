@@ -1,0 +1,8 @@
+Font
+  name: verdana-11px-mono-rounded-upscaled
+  texture: verdana-11px-mono-rounded_upscayl_2x_high-fidelity-4x
+  height: 28
+  glyph-size: 32 32
+  y-offset: -2
+  spacing: -6 0
+  space-width: 12

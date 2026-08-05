@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Quarentena do chão{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <a class="brand" href="/">Floor Quarantine</a>
+      <span class="subtitle">Investigação somente leitura</span>
+    </div>
+    <nav><a href="/">Itens</a><a href="/players">Jogadores</a><a href="/quarantine">Tiles</a></nav>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

@@ -1,0 +1,94 @@
+# Generated backup artifacts
+/backups/
+
+# Nested repository metadata should not be tracked by the root repository
+/sources/**/.git/
+/sources/**/.git.root-backup-disabled/
+/tools/**/.git/
+
+# OS and editor noise
+Thumbs.db
+Desktop.ini
+*.tmp
+*.temp
+*.cache
+*.pyc
+*.stackdump
+.vs/
+__pycache__/
+
+# Server runtime logs
+/server/*.log
+/server/*.err.log
+/server/data/logs/
+
+# Generated server/client builds and caches
+/builds/
+/sources/otclient-redemption/build/
+/sources/otclient-redemption/RelWithDebInfo/
+/sources/otclient-redemption/otclient.exe
+/sources/otclient-redemption/otclient.log
+/sources/otclient-redemption/records/
+/sources/otacademy-otclientv8/vcpkg_installed/
+/sources/otacademy-otclientv8/otclientv8.log
+/sources/otacademy-otclientv8/packet.log
+/sources/otacademy-otclientv8/records/
+/sources/otacademy-otclientv8/otclient_gl.exe
+/sources/otacademy-otclientv8/otclient_gl.exp
+/sources/otacademy-otclientv8/otclient_gl.lib
+/sources/otacademy-otclientv8/otclient_gl.pdb
+/sources/otacademy-otclientv8/tests.7z
+/sources/otacademy-otclientv8/vc17/otclient/OpenGL/
+
+# Toolchain caches and downloaded archives
+/tools/__pycache__/
+/tools/downloads/
+/tools/vcpkg/
+/tools/vcpkg-otacademy/
+
+# Experiment logs
+/experiments/*.log
+/experiments/downloads/
+/experiments/tibialegacy-world-extract/
+
+# Runtime logs from auxiliary client folders
+/otclientv8-master/otclientv8.log
+
+# TFS server build artifacts
+/sources/nekiro-tfs-1.5-7.72/build-vs/
+/sources/nekiro-tfs-1.5-7.72/build-cmake/
+
+# Toolchain dependencies and generated asset work files
+/tools/dependencies/
+/tools/assets/work/
+
+# Validation runs, benchmark results and generated reports
+/build-validation/
+/build-results/
+/performance-results/
+/outputs/
+/audit/
+
+# Backups and temporary material (tmp/ contains nested git repositories)
+/backup-extras/
+/tmp/
+
+# Server binaries, executable backups and export archives
+/server/*.exe
+/server/*.dll
+/server/staged_executables/
+/server/backup_executables/
+/server/*.zip
+/server/data/world/*.bak-*
+
+# Compiled benchmark outputs
+/tools/autosend-benchmark/build/
+
+# Object files and stray logs
+*.obj
+*.log
+
+# AI assistant tool folders
+/.agents/
+/.codex/
+/.codex-remote-attachments/

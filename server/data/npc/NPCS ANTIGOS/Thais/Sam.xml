@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<npc name="Sam" script="default.lua" walkinterval="2000" floorchange="0">
+	<health now="100" max="100" />
+	<look type="131" head="57" body="112" legs="48" feet="95" addons="0" />
+	<parameters>
+		<parameter key="message_greet" value="Hi |PLAYERNAME|. I buy and sell basic equipment. Ask me for an {offer}." />
+		<parameter key="message_farewell" value="Good bye and come again." />
+		<parameter key="module_shop" value="1" />
+		<parameter key="shop_buyable" value="axe,2386,20;battle axe,2378,150;battle hammer,2417,450;brass armor,2465,450;chain armor,2464,200;chain helmet,2458,52;chain legs,2648,80;dagger,2379,6;hand axe,2380,12;halberd,2381,400;leather armor,2467,35;leather helmet,2461,15;mace,2398,90;rapier,2384,15;sabre,2385,35;spear,2389,10;steel helmet,2457,190;steel shield,2509,240;sword,2376,85;wooden shield,2512,15" />
+		<parameter key="shop_sellable" value="axe,2386,5;battle axe,2378,70;battle hammer,2417,100;brass armor,2465,125;chain armor,2464,55;chain helmet,2458,13;chain legs,2648,20;dagger,2379,2;hand axe,2380,4;mace,2398,27;rapier,2384,5;sabre,2385,10;spear,2389,3;steel helmet,2457,170;steel shield,2509,72;sword,2376,23;wooden shield,2512,5" />
+	</parameters>
+</npc>
