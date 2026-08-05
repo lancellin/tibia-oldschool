@@ -69,8 +69,12 @@ bool PlayerIOManager::start()
 	port = static_cast<uint16_t>(g_config.getNumber(ConfigManager::PLAYER_IO_SERVICE_PORT));
 	loginClient = std::make_unique<PlayerIOClient>(host, port);
 	logoutClient = std::make_unique<PlayerIOClient>(host, port);
+	// The durable handoff channel carries PREPARE payloads for heavy characters
+	// and the readiness checks that gate relog. Under MariaDB lock contention
+	// these can legitimately need more than one second; a timeout that tight
+	// converts ordinary latency into ambiguous-outcome recovery churn.
 	handoffClient = std::make_unique<PlayerIOClient>(
-		host, port, std::chrono::seconds(1));
+		host, port, std::chrono::seconds(5));
 	healthClient = std::make_unique<PlayerIOClient>(
 		host, port, std::chrono::seconds(1));
 
@@ -562,6 +566,13 @@ void PlayerIOManager::loginThreadMain()
 			std::lock_guard<std::mutex> lock(activityMutex);
 			loadingPlayerIds.erase(snapshot->playerId);
 			snapshot->playerId = 0;
+		}
+		if (stopping) {
+			// The Dispatcher may already be CLOSING and would silently drop the
+			// callback task, leaking the name/player reservation. Release both
+			// here and do not publish a callback during shutdown.
+			releaseLogin(task.name, success ? snapshot->playerId : 0);
+			continue;
 		}
 		g_dispatcher.addTask(createTask(
 			[task = std::move(task),

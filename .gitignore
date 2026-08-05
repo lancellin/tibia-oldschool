@@ -92,3 +92,4 @@ __pycache__/
 /.agents/
 /.codex/
 /.codex-remote-attachments/
+/.qwen/

@@ -73,6 +73,15 @@ class PropStream
 {
 	public:
 		void init(const char* a, size_t size) {
+			if (!a) {
+				// A NULL SQL column carries no stream. Pointer arithmetic on
+				// nullptr is undefined even for size zero, so anchor both ends
+				// to a non-null sentinel; every read then fails gracefully.
+				static constexpr char nullSentinel = 0;
+				p = &nullSentinel;
+				end = &nullSentinel;
+				return;
+			}
 			p = a;
 			end = a + size;
 		}

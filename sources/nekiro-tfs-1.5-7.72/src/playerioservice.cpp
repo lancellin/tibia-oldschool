@@ -73,7 +73,7 @@ bool isTransientMariaDBError(unsigned int error)
 class ServiceDatabaseError : public std::runtime_error {
 public:
 	ServiceDatabaseError(unsigned int code, const std::string& message) :
-		std::runtime_error(message), transient(isTransientMariaDBError(code))
+		std::runtime_error(message), errorCode(code), transient(isTransientMariaDBError(code))
 	{
 	}
 
@@ -81,9 +81,33 @@ public:
 		return transient;
 	}
 
+	unsigned int code() const {
+		return errorCode;
+	}
+
 private:
+	unsigned int errorCode;
 	bool transient;
 };
+
+// MariaDB resolves lock cycles by aborting one transaction (1213) and reports
+// lock wait timeouts as 1205. Both clear as soon as the conflicting
+// transaction finishes, usually within milliseconds. Retrying immediately with
+// a short backoff keeps a contended login snapshot or durable PREPARE from
+// surfacing as a user-visible failure during heavy login/logout bursts.
+constexpr uint32_t LOCK_RETRY_ATTEMPTS = 3;
+
+bool isRetryableLockError(const std::exception& exception)
+{
+	const auto* databaseError = dynamic_cast<const ServiceDatabaseError*>(&exception);
+	return databaseError &&
+		(databaseError->code() == 1205 || databaseError->code() == 1213);
+}
+
+void sleepBeforeLockRetry(uint32_t attempt)
+{
+	std::this_thread::sleep_for(std::chrono::milliseconds(50 * (attempt + 1)));
+}
 
 struct ServiceConfig {
 	std::string listenHost = "127.0.0.1";
@@ -854,7 +878,19 @@ void handleClient(tcp::socket socket, ServiceConfig config)
 
 					case playerio::Opcode::QUERY: {
 						const std::string sql = reader.getString();
-						QueryResult result = database->query(sql);
+						QueryResult result;
+						for (uint32_t attempt = 0;; ++attempt) {
+							try {
+								result = database->query(sql);
+								break;
+							} catch (const std::exception& exception) {
+								if (attempt + 1 >= LOCK_RETRY_ATTEMPTS ||
+										!isRetryableLockError(exception)) {
+									throw;
+								}
+								sleepBeforeLockRetry(attempt);
+							}
+						}
 						playerio::addResponseEnvelope(response, opcode, requestId, true, "");
 						playerio::writeResultSet(response, toProtocolResult(std::move(result)));
 						break;
@@ -873,34 +909,47 @@ void handleClient(tcp::socket socket, ServiceConfig config)
 						}
 
 						std::vector<QueryResult> results;
-						try {
-							database->beginTransaction(true);
-							database->execute(
-								"INSERT IGNORE INTO `player_io_state` (`player_id`,`committed_revision`,`committed_job_id`,`next_revision`) VALUES (" +
-								std::to_string(playerId) + ",0,'',0)");
-							const PlayerState state = loadPlayerState(*database, playerId, true);
-							QueryResult pending = database->query(
-								"SELECT `status`,`last_error` FROM `player_io_jobs` WHERE `player_id`=" +
-								std::to_string(playerId) + " AND `status`<>" + std::to_string(JOB_COMMITTED) +
-								" ORDER BY `revision` DESC LIMIT 1 FOR UPDATE");
-							if (!pending.rows.empty()) {
-								throw std::runtime_error("player save is still pending: " + pending.rows.front()[1].value_or(""));
+						uint64_t committedRevision = 0;
+						for (uint32_t attempt = 0;; ++attempt) {
+							try {
+								database->beginTransaction(true);
+								database->execute(
+									"INSERT IGNORE INTO `player_io_state` (`player_id`,`committed_revision`,`committed_job_id`,`next_revision`) VALUES (" +
+									std::to_string(playerId) + ",0,'',0)");
+								const PlayerState state = loadPlayerState(*database, playerId, true);
+								QueryResult pending = database->query(
+									"SELECT `status`,`last_error` FROM `player_io_jobs` WHERE `player_id`=" +
+									std::to_string(playerId) + " AND `status`<>" + std::to_string(JOB_COMMITTED) +
+									" ORDER BY `revision` DESC LIMIT 1 FOR UPDATE");
+								if (!pending.rows.empty()) {
+									throw std::runtime_error("player save is still pending: " + pending.rows.front()[1].value_or(""));
+								}
+								results.clear();
+								results.reserve(queries.size());
+								for (const std::string& query : queries) {
+									results.emplace_back(database->query(query));
+								}
+								database->commitTransaction();
+								committedRevision = state.committedRevision;
+								break;
+							} catch (const std::exception& exception) {
+								database->rollbackTransaction();
+								if (attempt + 1 >= LOCK_RETRY_ATTEMPTS ||
+										!isRetryableLockError(exception)) {
+									throw;
+								}
+								sleepBeforeLockRetry(attempt);
+							} catch (...) {
+								database->rollbackTransaction();
+								throw;
 							}
-							results.reserve(queries.size());
-							for (const std::string& query : queries) {
-								results.emplace_back(database->query(query));
-							}
-							database->commitTransaction();
+						}
 
-							playerio::addResponseEnvelope(response, opcode, requestId, true, "");
-							response.addU64(state.committedRevision);
-							response.addU32(static_cast<uint32_t>(results.size()));
-							for (QueryResult& result : results) {
-								playerio::writeResultSet(response, toProtocolResult(std::move(result)));
-							}
-						} catch (...) {
-							database->rollbackTransaction();
-							throw;
+						playerio::addResponseEnvelope(response, opcode, requestId, true, "");
+						response.addU64(committedRevision);
+						response.addU32(static_cast<uint32_t>(results.size()));
+						for (QueryResult& result : results) {
+							playerio::writeResultSet(response, toProtocolResult(std::move(result)));
 						}
 						break;
 					}
@@ -939,7 +988,19 @@ void handleClient(tcp::socket socket, ServiceConfig config)
 							statements.emplace_back(reader.getString());
 						}
 
-						const JobRecord job = prepareJob(*database, jobId, playerId, playerio::serializeStatements(statements));
+						JobRecord job;
+						for (uint32_t attempt = 0;; ++attempt) {
+							try {
+								job = prepareJob(*database, jobId, playerId, playerio::serializeStatements(statements));
+								break;
+							} catch (const std::exception& exception) {
+								if (attempt + 1 >= LOCK_RETRY_ATTEMPTS ||
+										!isRetryableLockError(exception)) {
+									throw;
+								}
+								sleepBeforeLockRetry(attempt);
+							}
+						}
 						playerio::addResponseEnvelope(response, opcode, requestId, true, job.lastError);
 						response.addU8(static_cast<uint8_t>(toProtocolState(job.status)));
 						response.addU64(job.revision);
