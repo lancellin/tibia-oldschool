@@ -142,9 +142,28 @@ somente um valor isolado.
 
 **Resultado:**
 
-`☐ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
+`☒ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
 
 Logs e observações:
+
+- Execução 2026-08-05 18:59 (duração reduzida para 40 s, conforme autorizado;
+  binários do commit `c2aa2ba`):
+  - simulador: `performance-results\headless-load\20260805-185922-idle-100\summary.json`
+    — 100/100 logins, 0 falhas, 0 desconexões; latência de login média
+    7.956 ms, P95 10.797 ms, máx 11.098 ms (fila do worker único de login;
+    baseline 20260729-030322 tinha média 4.356 ms — diferença de fila, não de freeze);
+  - CSV do Dispatcher: `performance-results\dispatcher\20260805-185912-dispatcher.csv`
+    — burst de login: task_max 22 ms, 6 tarefas >10 ms, nenhuma >25 ms, busy 17,3%;
+    burst de logout (100 saves): task_max 5,1 ms, nenhuma tarefa >10 ms, busy 4,6%;
+    snapshot assíncrono no Dispatcher: máx 3,4 ms por personagem;
+    steady state: busy <1%, task_max <= 8,3 ms;
+  - log do TFS: `tmp\t01-tfs-20260805-185912.log` — sem erros, sem deadlocks,
+    sem saves pendentes;
+  - log do serviço: `tmp\t01-pio-20260805-185912.out.log` — err.log vazio;
+    100 jobs aplicados, drain completo, safe shutdown aceito com fila durável
+    vazia, journal podado (100 jobs antigos removidos);
+  - shutdown gracioso via CTRL_C: clean save commitado, serviço encerrou junto,
+    nenhum processo órfão.
 
 ---
 
