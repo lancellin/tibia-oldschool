@@ -81,6 +81,10 @@ __pycache__/
 /server/*.zip
 /server/data/world/*.bak-*
 
+# World map files (versioned separately)
+/server/data/world/world.otbm
+/server/data/world/backup de mapa/
+
 # Compiled benchmark outputs
 /tools/autosend-benchmark/build/
 
