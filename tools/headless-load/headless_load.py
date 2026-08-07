@@ -383,6 +383,7 @@ class HeadlessSession:
         self.closing = False
         self.reader_task: asyncio.Task[None] | None = None
         self.action_task: asyncio.Task[None] | None = None
+        self.keepalive_task: asyncio.Task[None] | None = None
         self.pending_action_at: float | None = None
         self.pending_action_name: str | None = None
         self._walk_step = 0
@@ -446,6 +447,7 @@ class HeadlessSession:
                 ],
             )
             self.reader_task = asyncio.create_task(self._reader_loop(), name=f"reader-{self.character_name}")
+            self.keepalive_task = asyncio.create_task(self._keepalive_loop(), name=f"keepalive-{self.character_name}")
         except Exception as exc:
             self.runner.counters.login_failed += 1
             self.runner.events.write(
@@ -595,11 +597,22 @@ class HeadlessSession:
         except asyncio.CancelledError:
             pass
 
+    async def _keepalive_loop(self) -> None:
+        """Send periodic pings to prevent server-side idle timeout (30s)."""
+        interval = max(1.0, self.runner.args.keepalive_interval)
+        try:
+            while self.connected and not self.closing:
+                await asyncio.sleep(interval)
+                if self.connected and not self.closing:
+                    await self._send_payload(bytes([OPCODE_PING]), "keepalive")
+        except asyncio.CancelledError:
+            pass
+
     async def close(self, send_logout: bool = True) -> None:
         if self.closing:
             return
         self.closing = True
-        for task in (self.action_task,):
+        for task in (self.action_task, self.keepalive_task):
             if task:
                 task.cancel()
         if send_logout and self.connected:

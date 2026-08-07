@@ -662,3 +662,25 @@ bool PlayerIOClient::shutdownIfIdle(bool& accepted, uint32_t& pendingJobs,
 		return false;
 	}
 }
+
+bool PlayerIOClient::armShutdownWhenIdle(std::string& error)
+{
+	std::lock_guard<std::recursive_mutex> lock(operationMutex);
+	const OperationDeadline deadline =
+		std::chrono::steady_clock::now() + operationTimeout;
+	const uint64_t requestId = nextRequestId();
+	playerio::Writer request;
+	playerio::addEnvelope(request, playerio::Opcode::SHUTDOWN_WHEN_IDLE, requestId);
+
+	if (!ensureConnected(deadline, error)) {
+		return false;
+	}
+
+	std::vector<uint8_t> payload;
+	bool success = false;
+	if (!exchange(playerio::Opcode::SHUTDOWN_WHEN_IDLE, requestId, request, payload,
+			success, deadline, error) || !success) {
+		return false;
+	}
+	return true;
+}

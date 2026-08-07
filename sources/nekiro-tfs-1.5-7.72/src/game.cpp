@@ -843,14 +843,15 @@ void Game::attributeContainerMutation(Cylinder* cylinder, uint32_t playerGuid)
 	attributeContainerPathAfterMutation(cylinder, playerGuid);
 }
 
-void Game::processItemActorAttributions()
+void Game::processItemActorAttributions(bool force)
 {
 	const int64_t now = OTSYS_TIME();
 	std::vector<Item*> ready;
 	ready.reserve(pendingItemActorAttributions.size());
 	for (const auto& entry : pendingItemActorAttributions) {
 		const PendingItemActorAttribution& pending = entry.second;
-		if (now - pending.lastModifiedMonotonic >= ITEM_ACTOR_DEBOUNCE_MS ||
+		if (force ||
+		    now - pending.lastModifiedMonotonic >= ITEM_ACTOR_DEBOUNCE_MS ||
 		    now - pending.firstModifiedMonotonic >= ITEM_ACTOR_MAX_DELAY_MS) {
 			ready.push_back(entry.first);
 		}
@@ -869,6 +870,15 @@ void Game::processItemActorAttributions()
 		}
 		root->decrementReferenceCounter();
 	}
+}
+
+void Game::flushItemActorAttributions()
+{
+	// Apply every pending subtree normalization immediately, ignoring the
+	// debounce window. Called right before a save/logout commit so the parent
+	// container and all nested items are serialized with a consistent
+	// lastActorGuid, even if the player relogs before the debounce fires.
+	processItemActorAttributions(true);
 }
 
 void Game::checkItemActorAttributions()
@@ -3863,17 +3873,23 @@ void Game::setGameState(GameState_t newState)
 				// setGameState assigned SHUTDOWN before entering this switch.
 				// Temporarily move to CLOSING so the coordinated clean-save
 				// routine can own the login barrier and the final player/tile
-				// checkpoint. If it fails, keep the process alive and blocked
-				// instead of misclassifying an unsafe exit as clean.
+				// checkpoint.
 				gameState = GAME_STATE_CLOSING;
-				if (!beginFloorPersistenceCleanSave()) {
-					std::cout << "[Error - Game::setGameState] Controlled shutdown cancelled because the clean save did not commit."
+				if (beginFloorPersistenceCleanSave()) {
+					controlledCleanSaveCommitted = true;
+					gameState = GAME_STATE_SHUTDOWN;
+				} else {
+					// Do not hang the process waiting on a clean save that was
+					// refused or failed: under an OS-driven close (console X) the
+					// process would be force-killed, losing player saves and
+					// triggering crash recovery. Fall back to the legacy kick-all
+					// + save so characters are persisted and the server exits;
+					// floor state stays uncommitted for recovery to handle.
+					std::cout << "[Error - Game::setGameState] Controlled clean save did not commit; "
+					             "falling back to legacy player save and shutdown."
 					          << std::endl;
-					return;
+					gameState = GAME_STATE_CLOSING;
 				}
-
-				controlledCleanSaveCommitted = true;
-				gameState = GAME_STATE_SHUTDOWN;
 			}
 
 			saveMotdNum();

@@ -1657,6 +1657,11 @@ void Player::onRemoveCreature(Creature* creature, bool isLogout)
 		}
 		cleanupTimer.stop();
 
+		// Normalize any pending lastActorGuid subtree before the logout commit so
+		// the parent container and all nested items are saved with a consistent
+		// GUID, even on an immediate relog before the debounce window fires.
+		g_game.flushItemActorAttributions();
+
 		const bool asynchronousLogout =
 			isLogout &&
 			g_playerIOManager.isEnabled() &&

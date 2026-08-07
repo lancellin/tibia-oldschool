@@ -36,6 +36,7 @@ public:
 		const std::vector<std::string>& statements, playerio::JobState& state,
 		uint64_t& committedRevision, std::string& error);
 	bool shutdownIfIdle(bool& accepted, uint32_t& pendingJobs, std::string& error);
+	bool armShutdownWhenIdle(std::string& error);
 
 	void close();
 

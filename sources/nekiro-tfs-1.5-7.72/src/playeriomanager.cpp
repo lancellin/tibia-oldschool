@@ -174,7 +174,7 @@ void PlayerIOManager::shutdown(bool stopServiceIfIdle)
 	serviceAvailable.store(false, std::memory_order_release);
 	enabled = false;
 
-	if (!serviceStopEligible) {
+	if (!stopServiceIfIdle) {
 		return;
 	}
 
@@ -186,17 +186,31 @@ void PlayerIOManager::shutdown(bool stopServiceIfIdle)
 	std::string error;
 	if (!shutdownClient.shutdownIfIdle(accepted, pendingJobs, error)) {
 		std::cerr << "Player I/O service safe shutdown request failed: "
-		          << error << ". The service will remain running." << std::endl;
+		          << error << ". Arming stop-when-idle as a fallback." << std::endl;
+		std::string armError;
+		if (shutdownClient.armShutdownWhenIdle(armError)) {
+			std::cout << "Player I/O service armed stop-when-idle; it will exit after "
+			             "finishing any pending saves." << std::endl;
+		}
 		return;
 	}
-	if (!accepted) {
-		std::cerr << "Player I/O service refused safe shutdown because it still has "
-		          << pendingJobs << " pending job(s). The service will remain running."
+	if (accepted) {
+		std::cout << "Player I/O service confirmed an empty durable queue and is shutting down."
 		          << std::endl;
 		return;
 	}
-	std::cout << "Player I/O service confirmed an empty durable queue and is shutting down."
-	          << std::endl;
+
+	// Durable work is still pending: the service must finish it first and then stop
+	// itself. Arm stop-when-idle instead of leaving the process running forever.
+	std::string armError;
+	if (shutdownClient.armShutdownWhenIdle(armError)) {
+		std::cout << "Player I/O service has " << pendingJobs
+		          << " pending job(s); armed stop-when-idle so it exits after draining."
+		          << std::endl;
+	} else {
+		std::cerr << "Player I/O service could not be armed for stop-when-idle: "
+		          << armError << ". The service will remain running." << std::endl;
+	}
 }
 
 bool PlayerIOManager::reserveLogin(const std::string& name)

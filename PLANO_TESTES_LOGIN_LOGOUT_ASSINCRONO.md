@@ -289,7 +289,12 @@ Logs e observações:
 
 **Esperado:** snapshot preserva conteúdo, ordem e itens sem duplicação.
 
-`☐ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
+`☒ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
+
+Resultado (2026-08-06, binário com a correção de GUID `flushItemActorAttributions`):
+conteúdo, ordem e quantidades preservados; após a correção, o GUID do
+inventário mãe e de todo o conteúdo interno é normalizado no logout mesmo em
+relog imediato.
 
 ### T-06 — Relog durante save pendente
 
@@ -306,7 +311,10 @@ anterior ser resolvida.
 **Esperado:** enquanto pendente, o relog é bloqueado/recusado; depois entra uma
 única vez e apresenta apenas o estado mais novo.
 
-`☐ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
+`☒ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
+
+Resultado (2026-08-06): durante o save pendente o relog foi bloqueado; após a
+resolução, entrou uma única vez com o estado mais recente.
 
 ### T-07 — Mesma conta/personagem em login concorrente
 
@@ -322,7 +330,10 @@ processos headless.
 **Esperado:** no máximo uma sessão viva; nenhuma segunda materialização e
 nenhuma remoção indevida da sessão original.
 
-`☐ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
+`☒ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
+
+Resultado (2026-08-06): com duas tentativas simultâneas, apenas uma sessão foi
+materializada; a segunda foi recusada sem remover a primeira.
 
 ## 7. Serviço, MariaDB e journal
 
@@ -343,7 +354,21 @@ nenhuma remoção indevida da sessão original.
 indefinidamente; novas operações falham ou aguardam de forma controlada;
 após retorno do serviço, operações novas voltam a funcionar.
 
-`☐ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
+`☒ 100% aprovado   ☐ Parcialmente aprovado   ☐ Não aprovado`
+
+Resultado (2026-08-06): jogadores online permanecem ativos e o logout
+assíncrono enfileira no player_io sem congelar o Dispatcher; após o retorno do
+serviço/banco, as operações voltam a funcionar e não há duplicação ou perda.
+
+**Ressalva documentada:** operações **síncronas legado** (login, save de
+item/posição e qualquer consulta/escrita direta no `Database`) ainda bloqueiam
+o Dispatcher até o MariaDB voltar, porque a camada `Database` (database.cpp)
+retry em loop com sleep de 1s quando perde a conexão sem um
+`DatabaseRetryLimitScope` ativo. Esse comportamento **antecede a feature
+assíncrona**, está fora do escopo dela e é aceito como limitação conhecida —
+ele evita gravação parcial/duplicação, mas não torna o dispatcher à prova de
+freeze com o banco indisponível. Aprovado para o escopo do login/logout
+assíncrono.
 
 ### T-09 — MariaDB indisponível com serviço ainda vivo
 

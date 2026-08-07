@@ -39,6 +39,11 @@ constexpr uint8_t JOB_COMMITTED = 3;
 constexpr uint8_t JOB_FAILED = 4;
 constexpr std::chrono::milliseconds CLIENT_SOCKET_TIMEOUT{10000};
 std::atomic<bool> serviceStopRequested{false};
+// Armed by a shutting-down TFS that left durable work behind: once set, the
+// service stops itself as soon as the durable queue drains and no client is
+// connected, instead of running forever with nobody to request a shutdown.
+std::atomic<bool> serviceStopWhenIdle{false};
+std::atomic<int> activeClientConnections{0};
 
 void configureClientSocketTimeouts(tcp::socket& socket)
 {
@@ -747,6 +752,16 @@ uint64_t pruneCommittedJournal(ServiceDatabase& db)
 	return removed;
 }
 
+uint32_t countPendingJobs(ServiceDatabase& db)
+{
+	QueryResult result = db.query(
+		"SELECT COUNT(*) AS `pending_jobs` FROM `player_io_jobs` WHERE `status` IN (1,2)");
+	if (result.rows.empty() || result.rows.front().empty()) {
+		throw std::runtime_error("could not count pending player I/O jobs");
+	}
+	return static_cast<uint32_t>(std::stoul(result.rows.front().front().value_or("0")));
+}
+
 bool inspectJob(const ServiceConfig& config, const std::string& jobId)
 {
 	ServiceDatabase db(config);
@@ -847,8 +862,21 @@ playerio::ResultSet toProtocolResult(QueryResult&& result)
 	return output;
 }
 
+namespace {
+struct ConnectionGuard {
+	explicit ConnectionGuard(std::atomic<int>& counter) : counter(counter) {
+		counter.fetch_add(1);
+	}
+	~ConnectionGuard() {
+		counter.fetch_sub(1);
+	}
+	std::atomic<int>& counter;
+};
+}
+
 void handleClient(tcp::socket socket, ServiceConfig config)
 {
+	ConnectionGuard connectionGuard(activeClientConnections);
 	try {
 		configureClientSocketTimeouts(socket);
 		std::vector<uint8_t> frame = playerio::readFrame(socket);
@@ -1088,6 +1116,18 @@ void handleClient(tcp::socket socket, ServiceConfig config)
 						break;
 					}
 
+					case playerio::Opcode::SHUTDOWN_WHEN_IDLE: {
+						// A shutting-down TFS that left durable work behind arms this so
+						// the service stops itself once the queue drains, instead of
+						// running forever with nobody left to request a shutdown.
+						serviceStopWhenIdle.store(true);
+						std::cout << "Player I/O service armed stop-when-idle: it will exit "
+						             "after the durable queue drains."
+						          << std::endl;
+						playerio::addResponseEnvelope(response, opcode, requestId, true, "");
+						break;
+					}
+
 					default:
 						throw std::runtime_error("unsupported player I/O opcode");
 				}
@@ -1099,7 +1139,13 @@ void handleClient(tcp::socket socket, ServiceConfig config)
 				playerio::addResponseEnvelope(response, opcode, requestId, false, exception.what());
 			}
 
-			playerio::writeFrame(socket, response.data());
+			try {
+				playerio::writeFrame(socket, response.data());
+			} catch (const std::exception&) {
+				// The requester may have disconnected before reading the reply.
+				// A failed response write must not cancel an already-accepted
+				// safe shutdown, otherwise the service would stay alive forever.
+			}
 			if (stopAfterResponse) {
 				serviceStopRequested = true;
 				std::cout << "Player I/O service safe shutdown accepted: durable queue is empty."
@@ -1167,6 +1213,19 @@ int main(int argc, char** argv)
 						recoveryDatabase = std::make_unique<ServiceDatabase>(config);
 					}
 					recoverPendingJobs(*recoveryDatabase, false);
+					// A shutting-down TFS armed stop-when-idle: once the durable queue
+					// is empty and no client is connected, stop ourselves so the service
+					// does not run forever after finishing recovered saves.
+					if (serviceStopWhenIdle.load() &&
+					    activeClientConnections.load() == 0 &&
+					    countPendingJobs(*recoveryDatabase) == 0) {
+						serviceStopRequested = true;
+						std::cout << "Player I/O service durable queue drained after armed "
+						             "stop-when-idle; shutting down."
+						          << std::endl;
+						wakeServiceListener(config);
+						break;
+					}
 					// Journal retention is deliberately excluded from the live service
 					// loop. Even a bounded DELETE can scan and lock a large payload table;
 					// maintenance must run only in an explicit offline window.

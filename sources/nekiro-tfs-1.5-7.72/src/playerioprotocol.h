@@ -25,6 +25,7 @@ enum class Opcode : uint8_t {
 	PREPARE_SAVE_JOB = 7,
 	APPLY_SAVE_JOB = 8,
 	SHUTDOWN_IF_IDLE = 9,
+	SHUTDOWN_WHEN_IDLE = 10,
 };
 
 enum class JobState : uint8_t {

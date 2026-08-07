@@ -401,6 +401,10 @@ class Game
 
 		void start(ServiceManager* manager);
 
+		// Immediately apply all pending lastActorGuid subtree normalizations so a
+		// save/logout commit serializes consistent GUIDs even on an early relog.
+		void flushItemActorAttributions();
+
 		void forceAddCondition(uint32_t creatureId, Condition* condition);
 		void forceRemoveCondition(uint32_t creatureId, ConditionType_t type);
 
@@ -996,7 +1000,7 @@ class Game
 		void checkDecay();
 		void internalDecayItem(Item* item);
 		void checkItemActorAttributions();
-		void processItemActorAttributions();
+		void processItemActorAttributions(bool force = false);
 		void queueItemActorAttribution(Item* root, uint32_t playerGuid);
 		void normalizeItemActorSubtree(Item* root, uint32_t playerGuid,
 		                               bool allowVirtualStorage = false);
