@@ -756,7 +756,7 @@ bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList,
 	int32_t runningId = 100;
 	uint64_t serializeNanoseconds = 0;
 	uint64_t buildRowsNanoseconds = 0;
-	const bool measure = measureInventory && dispatcherLogoutMetricsContextActive() && dispatcherMetricsEnabled();
+	const bool measure = measureInventory && dispatcherPlayerSaveMetricsContextActive() && dispatcherMetricsEnabled();
 
 	Database& db = Database::getInstance();
 	for (const auto& it : itemList) {
@@ -949,7 +949,7 @@ bool IOLoginData::savePlayerData(Player* player)
 {
 	DispatcherPhaseMetricsTimer coreTimer(
 		DispatcherMetricsPhase::LOGOUT_SAVE_CORE,
-		dispatcherLogoutMetricsContextActive());
+		dispatcherPlayerSaveMetricsContextActive());
 	if (player->getHealth() <= 0) {
 		player->changeHealth(1);
 	}
@@ -1065,7 +1065,7 @@ bool IOLoginData::savePlayerData(Player* player)
 	// learned spells
 	DispatcherPhaseMetricsTimer spellsTimer(
 		DispatcherMetricsPhase::LOGOUT_SAVE_SPELLS,
-		dispatcherLogoutMetricsContextActive());
+		dispatcherPlayerSaveMetricsContextActive());
 	if (!db.executeQuery(fmt::format("DELETE FROM `player_spells` WHERE `player_id` = {:d}", player->getGUID()))) {
 		return false;
 	}
@@ -1084,8 +1084,8 @@ bool IOLoginData::savePlayerData(Player* player)
 
 	DispatcherPhaseMetricsTimer inventoryTimer(
 		DispatcherMetricsPhase::LOGOUT_SAVE_INVENTORY,
-		dispatcherLogoutMetricsContextActive());
-	const bool measureInventory = dispatcherLogoutMetricsContextActive() && dispatcherMetricsEnabled();
+		dispatcherPlayerSaveMetricsContextActive());
+	const bool measureInventory = dispatcherPlayerSaveMetricsContextActive() && dispatcherMetricsEnabled();
 	uint64_t inventoryPrepareNanoseconds = 0;
 	const auto openStateStartedAt = measureInventory
 		? std::chrono::steady_clock::now()
@@ -1135,7 +1135,7 @@ bool IOLoginData::savePlayerData(Player* player)
 	//save depot locker items
 	DispatcherPhaseMetricsTimer depotTimer(
 		DispatcherMetricsPhase::LOGOUT_SAVE_DEPOT,
-		dispatcherLogoutMetricsContextActive());
+		dispatcherPlayerSaveMetricsContextActive());
 	bool needsSave = false;
 
 	for (const auto& it : player->depotLockerMap) {
@@ -1221,7 +1221,7 @@ bool IOLoginData::savePlayerData(Player* player)
 
 	DispatcherPhaseMetricsTimer storageTimer(
 		DispatcherMetricsPhase::LOGOUT_SAVE_STORAGE,
-		dispatcherLogoutMetricsContextActive());
+		dispatcherPlayerSaveMetricsContextActive());
 	if (!db.executeQuery(fmt::format("DELETE FROM `player_storage` WHERE `player_id` = {:d}", player->getGUID()))) {
 		return false;
 	}

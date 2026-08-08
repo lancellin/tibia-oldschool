@@ -185,7 +185,14 @@ class Container : public Item, public Cylinder
 
 		bool unlocked;
 		bool pagination;
-		bool floorPersistenceSubtreeIdentified = false;
+		// Vacuously true for a new/empty container. The proof is maintained
+		// incrementally: every insertion/replacement path invalidates it (and
+		// every ancestor's) when the entering subtree is not ready, and player
+		// mutations identify the moved subtree before insertion. Starting true
+		// lets containers assembled at load time keep their proof without a full
+		// scan, eliminating the O(subtree) re-identification on the first
+		// mutation after login.
+		bool floorPersistenceSubtreeIdentified = true;
 
 		void onAddContainerItem(Item* item);
 		void onUpdateContainerItem(uint32_t index, Item* oldItem, Item* newItem);

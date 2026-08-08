@@ -21,6 +21,7 @@
 
 #include "configmanager.h"
 #include "database.h"
+#include "dispatchermetrics.h"
 #include "playeriodatabase.h"
 
 #include <mysql/errmsg.h>
@@ -37,6 +38,26 @@ bool consumeDatabaseTransientRetry(uint32_t& retries)
 	}
 	++retries;
 	return true;
+}
+
+// Acquires the shared database connection lock. While a
+// DispatcherDatabaseLockWaitScope is active on the calling thread (checkpoint
+// diagnostics), the time spent waiting for the lock is recorded so contention
+// with other database users (e.g. the async database task thread) can be told
+// apart from MariaDB execution time.
+void acquireDatabaseLockWithWaitRecording(std::recursive_mutex& lock)
+{
+	if (!dispatcherDatabaseLockWaitRecordingActive()) {
+		lock.lock();
+		return;
+	}
+
+	const auto startedAt = std::chrono::steady_clock::now();
+	lock.lock();
+	const uint64_t waitNanoseconds = static_cast<uint64_t>(
+		std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::steady_clock::now() - startedAt).count());
+	recordDispatcherDatabaseLockWait(waitNanoseconds);
 }
 }
 
@@ -99,7 +120,7 @@ bool Database::beginTransaction()
 		return false;
 	}
 
-	databaseLock.lock();
+	acquireDatabaseLockWithWaitRecording(databaseLock);
 	return true;
 }
 
@@ -145,7 +166,7 @@ bool Database::executeQuery(const std::string& query)
 	uint32_t transientRetries = 0;
 
 	// executes the query
-	databaseLock.lock();
+	acquireDatabaseLockWithWaitRecording(databaseLock);
 
 	while (mysql_real_query(handle, query.c_str(), query.length()) != 0) {
 		std::cout << "[Error - mysql_real_query] Query: " << query.substr(0, 256) << std::endl << "Message: " << mysql_error(handle) << std::endl;
@@ -177,7 +198,7 @@ DBResult_ptr Database::storeQuery(const std::string& query)
 		return remote->storeQuery(query);
 	}
 
-	databaseLock.lock();
+	acquireDatabaseLockWithWaitRecording(databaseLock);
 	uint32_t transientRetries = 0;
 
 	retry:
@@ -231,7 +252,7 @@ std::string Database::escapeBlob(const char* s, uint32_t length) const
 		return remote->escapeBlob(s, length);
 	}
 
-	std::lock_guard<std::recursive_mutex> lock(databaseLock);
+	acquireDatabaseLockWithWaitRecording(databaseLock);
 
 	// the worst case is 2n + 1
 	size_t maxLength = (length * 2) + 1;
@@ -248,6 +269,7 @@ std::string Database::escapeBlob(const char* s, uint32_t length) const
 	}
 
 	escaped.push_back('\'');
+	databaseLock.unlock();
 	return escaped;
 }
 

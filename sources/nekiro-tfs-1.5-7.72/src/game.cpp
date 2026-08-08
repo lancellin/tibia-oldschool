@@ -117,6 +117,38 @@ namespace {
 			bool active;
 	};
 
+	class ItemMovePersistenceMetricsScope final
+	{
+		public:
+			ItemMovePersistenceMetricsScope() : enabled(dispatcherMetricsEnabled()) {}
+
+			~ItemMovePersistenceMetricsScope() {
+				if (enabled && accumulatedNanoseconds != 0) {
+					recordDispatcherPhase(DispatcherMetricsPhase::ITEM_MOVE_PERSISTENCE,
+						accumulatedNanoseconds);
+				}
+			}
+
+			void begin() {
+				if (enabled) {
+					segmentStartedAt = std::chrono::steady_clock::now();
+				}
+			}
+
+			void end() {
+				if (enabled) {
+					accumulatedNanoseconds += static_cast<uint64_t>(
+						std::chrono::duration_cast<std::chrono::nanoseconds>(
+							std::chrono::steady_clock::now() - segmentStartedAt).count());
+				}
+			}
+
+		private:
+			bool enabled = false;
+			uint64_t accumulatedNanoseconds = 0;
+			std::chrono::steady_clock::time_point segmentStartedAt;
+	};
+
 	struct FloorCheckpointEndpoint {
 		Player* player = nullptr;
 		Tile* tile = nullptr;
@@ -278,6 +310,8 @@ void Game::markFloorTileDirty(const Tile& tile, FloorDirtyReason_t reason, Floor
 	if (groupIt != floorCheckpointTileGroups.end()) {
 		touchFloorCheckpointGroup(groupIt->second);
 	}
+
+	recordDispatcherFloorDirtyEvent(floorDirtyTiles.size());
 }
 
 bool Game::hasFloorCheckpointForPlayer(uint32_t playerGuid) const
@@ -366,6 +400,8 @@ uint64_t Game::mergeFloorCheckpointGroups(const std::set<uint64_t>& groupIds)
 void Game::identifyFloorPersistenceMovableContainerAfterPlayerMutation(Cylinder* cylinder,
 	Player* actorPlayer)
 {
+	DispatcherPhaseMetricsTimer identifyTimer(DispatcherMetricsPhase::ITEM_MOVE_IDENTIFY);
+
 	if (!cylinder || !actorPlayer || !isFloorDirtyPlayerMutationActive()) {
 		return;
 	}
@@ -417,10 +453,15 @@ void Game::identifyFloorPersistenceMovableContainerAfterPlayerMutation(Cylinder*
 		return;
 	}
 
-	// A successful insertion/removal invalidates the old subtree proof. Scan the
-	// whole movable container so pre-existing children and the newly inserted
-	// subtree are identified together. Stackables remain identity-exempt.
-	outermostContainer->setFloorPersistenceIdentifiedSubtree(false);
+	// Player mutations identify the moved subtree before insertion
+	// (markAsPlayerMovedForFloorPersistence runs on the moved item prior to
+	// addThing in every insertion path), and removals cannot introduce
+	// unidentified items. A subtree proof that was valid before the mutation
+	// therefore stays valid, so it must not be invalidated here: doing so
+	// forced a full re-identification scan of the whole movable container on
+	// every single move. markAsPlayerMovedForFloorPersistence() early-exits
+	// while the proof holds and otherwise performs the full identification
+	// scan and rebuilds the proof exactly as before.
 	outermostMovableContainer->markAsPlayerMovedForFloorPersistence();
 	// Do not stamp the investigative actor here. The independent actor
 	// attribution pass must observe the previous GUID/consistency proof so it
@@ -430,6 +471,8 @@ void Game::identifyFloorPersistenceMovableContainerAfterPlayerMutation(Cylinder*
 void Game::stampFloorPersistenceActorAfterPlayerMutation(Cylinder* cylinder, Item* item,
 	Player* actorPlayer)
 {
+	DispatcherPhaseMetricsTimer stampTimer(DispatcherMetricsPhase::ITEM_MOVE_STAMP);
+
 	if (!cylinder || !item || !actorPlayer || !isFloorDirtyPlayerMutationActive()) {
 		return;
 	}
@@ -576,6 +619,7 @@ void Game::queueItemActorAttribution(Item* root, uint32_t playerGuid)
 	pending.firstModifiedMonotonic = now;
 	pending.lastModifiedMonotonic = now;
 	pendingItemActorAttributions.emplace(root, pending);
+	recordDispatcherActorAttributionQueued(pendingItemActorAttributions.size());
 }
 
 void Game::normalizeItemActorSubtree(Item* root, uint32_t playerGuid,
@@ -682,6 +726,8 @@ bool Game::hasPendingItemActorAttributionWithin(Item* containerItem,
 
 void Game::attributeContainerPathAfterMutation(Cylinder* cylinder, uint32_t playerGuid)
 {
+	DispatcherPhaseMetricsTimer pathTimer(DispatcherMetricsPhase::ITEM_MOVE_ATTR_PATH);
+
 	if (!cylinder || playerGuid == 0 || isInsideCreatureCorpse(cylinder)) {
 		return;
 	}
@@ -727,6 +773,8 @@ void Game::attributeContainerPathAfterMutation(Cylinder* cylinder, uint32_t play
 void Game::attributeSuccessfulItemEndpoint(Cylinder* expectedCylinder, Item* item,
 	uint32_t playerGuid)
 {
+	DispatcherPhaseMetricsTimer endpointTimer(DispatcherMetricsPhase::ITEM_MOVE_ATTR_ENDPOINT);
+
 	if (!expectedCylinder || !item || playerGuid == 0 || item->isRemoved() ||
 	    item->getParent() != expectedCylinder ||
 	    item->isFloorPersistenceCreatureCorpse() ||
@@ -845,6 +893,9 @@ void Game::attributeContainerMutation(Cylinder* cylinder, uint32_t playerGuid)
 
 void Game::processItemActorAttributions(bool force)
 {
+	DispatcherPhaseMetricsTimer attributionTimer(DispatcherMetricsPhase::ITEM_ACTOR_ATTRIBUTION,
+		!pendingItemActorAttributions.empty());
+
 	const int64_t now = OTSYS_TIME();
 	std::vector<Item*> ready;
 	ready.reserve(pendingItemActorAttributions.size());
@@ -857,6 +908,7 @@ void Game::processItemActorAttributions(bool force)
 		}
 	}
 
+	uint32_t resolvedCount = 0;
 	for (Item* root : ready) {
 		auto it = pendingItemActorAttributions.find(root);
 		if (it == pendingItemActorAttributions.end()) {
@@ -864,11 +916,16 @@ void Game::processItemActorAttributions(bool force)
 		}
 		const uint32_t playerGuid = it->second.playerGuid;
 		pendingItemActorAttributions.erase(it);
+		++resolvedCount;
 		if (!root->isRemoved()) {
 			normalizeItemActorSubtree(root, playerGuid);
 			certifyItemActorAncestorPath(root, playerGuid);
 		}
 		root->decrementReferenceCounter();
+	}
+
+	if (resolvedCount != 0) {
+		recordDispatcherActorAttributionsResolved(resolvedCount);
 	}
 }
 
@@ -891,6 +948,8 @@ void Game::checkItemActorAttributions()
 void Game::registerFloorCheckpointTransfer(Cylinder* fromCylinder, Cylinder* toCylinder, Item* movedItem,
 	Player* actorPlayer)
 {
+	DispatcherPhaseMetricsTimer checkpointRegTimer(DispatcherMetricsPhase::ITEM_MOVE_CHECKPOINT_REG);
+
 	if (!floorSnapshotShadowEnabled || !floorDirtyTrackingEnabled) {
 		return;
 	}
@@ -1299,6 +1358,8 @@ uint32_t Game::processFloorSnapshots(bool force)
 		return 0;
 	}
 
+	DispatcherPhaseMetricsTimer snapshotTickTimer(DispatcherMetricsPhase::FLOOR_SNAPSHOT_TICK);
+
 	const int64_t now = OTSYS_TIME();
 	uint32_t queued = 0;
 	std::vector<uint64_t> readyGroups;
@@ -1375,6 +1436,8 @@ uint32_t Game::processFloorSnapshots(bool force)
 
 bool Game::queueFloorSnapshot(const Position& position, FloorDirtyTileRecord& record)
 {
+	DispatcherPhaseMetricsTimer prepareTimer(DispatcherMetricsPhase::FLOOR_SNAPSHOT_PREPARE);
+
 	Tile* tile = map.getTile(position);
 	// City tiles are captured during normal runtime as crash-recovery data.
 	// They are filtered only after a clean, coordinated server save.
@@ -1496,6 +1559,8 @@ bool Game::prepareFloorSnapshot(const Position& position, const FloorDirtyTileRe
 	bool cityCleanupFiltered, uint64_t groupId, uint64_t groupVersion,
 	PreparedFloorSnapshot& prepared, std::string& error)
 {
+	DispatcherPhaseMetricsTimer prepareTimer(DispatcherMetricsPhase::FLOOR_SNAPSHOT_PREPARE);
+
 	FloorSnapshotData snapshot;
 	const auto serializationStarted = std::chrono::steady_clock::now();
 	if (!FloorPersistenceSerializer::serializeTile(position, map.getTile(position), cityCleanupFiltered, snapshot, error)) {
@@ -1591,18 +1656,35 @@ bool Game::executeFloorSnapshotsTransaction(const std::vector<PreparedFloorSnaps
 	}
 
 	DBTransaction transaction;
-	if (!transaction.begin()) {
-		error = "could not begin coordinated checkpoint transaction";
-		return false;
+	{
+		DispatcherPhaseMetricsTimer beginTimer(DispatcherMetricsPhase::FLOOR_CHECKPOINT_TX_BEGIN);
+		if (!transaction.begin()) {
+			error = "could not begin coordinated checkpoint transaction";
+			return false;
+		}
 	}
 
 	for (Player* checkpointPlayer : checkpointPlayers) {
-		if (!checkpointPlayer || !IOLoginData::savePlayerData(checkpointPlayer)) {
+		DispatcherPhaseMetricsTimer playerSaveTimer(
+			DispatcherMetricsPhase::FLOOR_CHECKPOINT_PLAYER_SAVE, checkpointPlayer != nullptr);
+		if (!checkpointPlayer) {
+			error = "could not save every player in the coordinated checkpoint";
+			return false;
+		}
+
+		bool playerSaved;
+		{
+			DispatcherCheckpointSaveMetricsContext checkpointSaveContext;
+			playerSaved = IOLoginData::savePlayerData(checkpointPlayer);
+		}
+		if (!playerSaved) {
 			error = "could not save every player in the coordinated checkpoint";
 			return false;
 		}
 	}
 	for (House* checkpointHouse : checkpointHouses) {
+		DispatcherPhaseMetricsTimer houseSaveTimer(
+			DispatcherMetricsPhase::FLOOR_CHECKPOINT_HOUSE_SAVE, checkpointHouse != nullptr);
 		if (!checkpointHouse || !IOMapSerialize::saveHouseData(checkpointHouse)) {
 			error = "could not save every house in the coordinated checkpoint";
 			return false;
@@ -1610,27 +1692,36 @@ bool Game::executeFloorSnapshotsTransaction(const std::vector<PreparedFloorSnaps
 	}
 
 	Database& database = Database::getInstance();
-	if (resetFloorSnapshots && !database.executeQuery(fmt::format(
-		"DELETE FROM `floor_persistence_snapshots` WHERE `world_id`={:d} AND `generation_id`={:d}",
-		floorSnapshotWorldId, floorSnapshotGenerationId))) {
-		error = "could not atomically remove materialized snapshots for the weekly floor reset";
-		return false;
-	}
-	for (const PreparedFloorSnapshot& snapshot : snapshots) {
-		if (!database.executeQuery(snapshot.query)) {
-			error = "could not save every tile in the coordinated checkpoint";
+	size_t executedTileQueries = 0;
+	{
+		DispatcherPhaseMetricsTimer tileSqlTimer(DispatcherMetricsPhase::FLOOR_CHECKPOINT_TILE_SQL);
+		if (resetFloorSnapshots && !database.executeQuery(fmt::format(
+			"DELETE FROM `floor_persistence_snapshots` WHERE `world_id`={:d} AND `generation_id`={:d}",
+			floorSnapshotWorldId, floorSnapshotGenerationId))) {
+			error = "could not atomically remove materialized snapshots for the weekly floor reset";
 			return false;
 		}
+		for (const PreparedFloorSnapshot& snapshot : snapshots) {
+			if (!database.executeQuery(snapshot.query)) {
+				error = "could not save every tile in the coordinated checkpoint";
+				return false;
+			}
+			++executedTileQueries;
+		}
 	}
+	recordDispatcherCheckpointTileQueries(executedTileQueries);
 
-	if (!database.executeQuery(fmt::format(
-		"INSERT INTO `floor_persistence_checkpoints` (`world_id`,`generation_id`,`save_session_id`,"
-		"`checkpoint_group_id`,`checkpoint_group_version`,`tile_count`,`player_count`,`house_count`,`state`) VALUES "
-		"({:d},{:d},{:d},{:d},{:d},{:d},{:d},{:d},'COMMITTED')",
-		floorSnapshotWorldId, floorSnapshotGenerationId, floorPersistenceSessionId, groupId, groupVersion,
-		snapshots.size(), checkpointPlayers.size(), checkpointHouses.size()))) {
-		error = "could not register the coordinated checkpoint commit";
-		return false;
+	{
+		DispatcherPhaseMetricsTimer markerTimer(DispatcherMetricsPhase::FLOOR_CHECKPOINT_MARKER_SQL);
+		if (!database.executeQuery(fmt::format(
+			"INSERT INTO `floor_persistence_checkpoints` (`world_id`,`generation_id`,`save_session_id`,"
+			"`checkpoint_group_id`,`checkpoint_group_version`,`tile_count`,`player_count`,`house_count`,`state`) VALUES "
+			"({:d},{:d},{:d},{:d},{:d},{:d},{:d},{:d},'COMMITTED')",
+			floorSnapshotWorldId, floorSnapshotGenerationId, floorPersistenceSessionId, groupId, groupVersion,
+			snapshots.size(), checkpointPlayers.size(), checkpointHouses.size()))) {
+			error = "could not register the coordinated checkpoint commit";
+			return false;
+		}
 	}
 
 	// The filtered city snapshots and CLEAN_COMMITTED must become durable
@@ -1643,6 +1734,7 @@ bool Game::executeFloorSnapshotsTransaction(const std::vector<PreparedFloorSnaps
 			return false;
 		}
 
+		DispatcherPhaseMetricsTimer cleanSaveTimer(DispatcherMetricsPhase::FLOOR_CHECKPOINT_CLEAN_SAVE_SQL);
 		if (!database.executeQuery(fmt::format(
 			"UPDATE `floor_persistence_save_sessions` SET `state`='CLEAN_COMMITTED',"
 			"`player_count`={:d},`tile_count`={:d},`error`='',`updated_at`=CURRENT_TIMESTAMP(6),"
@@ -1653,9 +1745,12 @@ bool Game::executeFloorSnapshotsTransaction(const std::vector<PreparedFloorSnaps
 		}
 	}
 
-	if (!transaction.commit()) {
-		error = "could not commit the coordinated checkpoint transaction";
-		return false;
+	{
+		DispatcherPhaseMetricsTimer commitTimer(DispatcherMetricsPhase::FLOOR_CHECKPOINT_TX_COMMIT);
+		if (!transaction.commit()) {
+			error = "could not commit the coordinated checkpoint transaction";
+			return false;
+		}
 	}
 	if (commitCleanSave) {
 		floorPersistenceSessionState = "CLEAN_COMMITTED";
@@ -1694,6 +1789,9 @@ bool Game::executeFloorCheckpointGroup(uint64_t groupId, Player* requiredPlayer)
 	if (groupIt == floorCheckpointGroups.end()) {
 		return true;
 	}
+
+	DispatcherPhaseMetricsTimer checkpointTimer(DispatcherMetricsPhase::FLOOR_CHECKPOINT_GROUP);
+	DispatcherDatabaseLockWaitScope databaseLockWaitScope;
 
 	FloorCheckpointGroup& group = groupIt->second;
 	std::vector<Player*> checkpointPlayers;
@@ -1768,6 +1866,7 @@ bool Game::executeFloorCheckpointGroup(uint64_t groupId, Player* requiredPlayer)
 	floorSnapshotStats.checkpointPlayersSaved += checkpointPlayers.size();
 	floorSnapshotStats.checkpointHousesSaved += checkpointHouses.size();
 	++floorSnapshotStats.checkpointGroupsSucceeded;
+	recordDispatcherCheckpointGroupSaved(snapshots.size(), checkpointPlayers.size());
 	removeFloorCheckpointGroup(groupId);
 	return true;
 }
@@ -4909,6 +5008,8 @@ void Game::playerMoveItem(Player* player, const Position& fromPos,
 ReturnValue Game::internalMoveItem(Cylinder* fromCylinder, Cylinder* toCylinder, int32_t index,
                                    Item* item, uint32_t count, Item** _moveItem, uint32_t flags /*= 0*/, Creature* actor/* = nullptr*/, Item* tradeItem/* = nullptr*/, const Position* fromPos /*= nullptr*/, const Position* toPos/*= nullptr*/)
 {
+	DispatcherPhaseMetricsTimer moveTimer(DispatcherMetricsPhase::ITEM_MOVE_TOTAL);
+
 	Player* actorPlayer = actor ? actor->getPlayer() : nullptr;
 	if (actorPlayer && fromPos && toPos) {
 		if (!g_events->eventPlayerOnMoveItem(actorPlayer, item, count, *fromPos, *toPos, fromCylinder, toCylinder)) {
@@ -4945,6 +5046,7 @@ ReturnValue Game::internalMoveItem(Cylinder* fromCylinder, Cylinder* toCylinder,
 	}
 
 	FloorDirtyPlayerMutationScope floorDirtyPlayerMutationScope(*this, actorPlayer != nullptr);
+	ItemMovePersistenceMetricsScope persistenceMetricsScope;
 
 	//check if we can add this item
 	ReturnValue ret = toCylinder->queryAdd(index, *item, count, flags, actor);
@@ -4977,6 +5079,7 @@ ReturnValue Game::internalMoveItem(Cylinder* fromCylinder, Cylinder* toCylinder,
 				fromCylinder->addThing(toItem);
 
 				if (actorPlayer) {
+					persistenceMetricsScope.begin();
 					stampFloorPersistenceActorAfterPlayerMutation(fromCylinder, toItem, actorPlayer);
 					identifyFloorPersistenceMovableContainerAfterPlayerMutation(toCylinder, actorPlayer);
 					identifyFloorPersistenceMovableContainerAfterPlayerMutation(fromCylinder, actorPlayer);
@@ -4984,6 +5087,7 @@ ReturnValue Game::internalMoveItem(Cylinder* fromCylinder, Cylinder* toCylinder,
 						fromCylinder, toItem, actorPlayer->getGUID());
 					attributeContainerPathAfterMutation(
 						toCylinder, actorPlayer->getGUID());
+					persistenceMetricsScope.end();
 				}
 
 				if (oldToItemIndex != -1) {
@@ -5120,6 +5224,7 @@ ReturnValue Game::internalMoveItem(Cylinder* fromCylinder, Cylinder* toCylinder,
 	bool atomicMailCommitted = false;
 
 	if (actorPlayer) {
+		persistenceMetricsScope.begin();
 		stampFloorPersistenceActorAfterPlayerMutation(fromCylinder, sourceRemainder, actorPlayer);
 		stampFloorPersistenceActorAfterPlayerMutation(toCylinder, moveItem, actorPlayer);
 		if (updateItem && updateItem != moveItem) {
@@ -5142,15 +5247,18 @@ ReturnValue Game::internalMoveItem(Cylinder* fromCylinder, Cylinder* toCylinder,
 			attributeSuccessfulItemEndpoint(toCylinder, updateItem, destinationActorGuid);
 		}
 		attributeContainerPathAfterMutation(toCylinder, destinationActorGuid);
+		persistenceMetricsScope.end();
 	} else if (Player* destinationOwner = findPlayerStorageOwner(toCylinder);
 	           destinationOwner &&
 	           destinationOwner->getTradeState() != TRADE_TRANSFER) {
+		persistenceMetricsScope.begin();
 		const uint32_t destinationActorGuid = destinationOwner->getGUID();
 		attributeSuccessfulItemEndpoint(toCylinder, moveItem, destinationActorGuid);
 		if (updateItem && updateItem != moveItem) {
 			attributeSuccessfulItemEndpoint(toCylinder, updateItem, destinationActorGuid);
 		}
 		attributeContainerPathAfterMutation(toCylinder, destinationActorGuid);
+		persistenceMetricsScope.end();
 	}
 
 	if (itemIndex != -1) {
@@ -5215,8 +5323,10 @@ ReturnValue Game::internalMoveItem(Cylinder* fromCylinder, Cylinder* toCylinder,
 	}
 
 	if (actorPlayer && !atomicMailCommitted) {
+		persistenceMetricsScope.begin();
 		Item* checkpointItem = moveItem ? moveItem : updateItem;
 		registerFloorCheckpointTransfer(fromCylinder, toCylinder, checkpointItem, actorPlayer);
+		persistenceMetricsScope.end();
 	}
 
 	if (actorPlayer && fromPos && toPos) {

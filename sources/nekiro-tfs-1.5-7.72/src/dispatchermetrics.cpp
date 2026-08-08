@@ -68,10 +68,31 @@ constexpr std::array<const char*, DISPATCHER_PHASE_COUNT> DISPATCHER_PHASE_NAMES
 	"logout_save_storage",
 	"logout_save_commit",
 	"logout_vip_notify",
+	"item_move_total",
+	"item_move_persistence",
+	"floor_snapshot_tick",
+	"floor_snapshot_prepare",
+	"floor_checkpoint_group",
+	"floor_checkpoint_player_save",
+	"floor_checkpoint_tx_begin",
+	"floor_checkpoint_house_save",
+	"floor_checkpoint_tile_sql",
+	"floor_checkpoint_marker_sql",
+	"floor_checkpoint_clean_save_sql",
+	"floor_checkpoint_tx_commit",
+	"floor_checkpoint_db_lock_wait",
+	"item_actor_attribution",
+	"item_move_stamp",
+	"item_move_identify",
+	"item_move_attr_endpoint",
+	"item_move_attr_path",
+	"item_move_checkpoint_reg",
 };
 
 thread_local bool logoutMetricsContextActive = false;
 thread_local bool dispatcherMetricsSuppressed = false;
+thread_local bool databaseLockWaitRecordingActive = false;
+thread_local bool checkpointSaveMetricsContextActive = false;
 
 constexpr std::array<uint64_t, 25> DURATION_BUCKETS_NANOSECONDS = {
 	1'000ULL,
@@ -216,6 +237,14 @@ struct DispatcherMetricsRow {
 	uint64_t successfulLogins = 0;
 	uint64_t failedLogins = 0;
 	std::array<DurationSummary, DISPATCHER_PHASE_COUNT> phases;
+	uint64_t floorDirtyMarks = 0;
+	uint64_t floorDirtyTilesMax = 0;
+	uint64_t floorCheckpointGroupsSaved = 0;
+	uint64_t floorCheckpointMaxTiles = 0;
+	uint64_t floorCheckpointMaxPlayers = 0;
+	uint64_t floorCheckpointTileQueries = 0;
+	uint64_t actorAttributionsPendingMax = 0;
+	uint64_t actorAttributionsResolved = 0;
 };
 
 class DispatcherMetrics {
@@ -332,6 +361,54 @@ class DispatcherMetrics {
 			phaseExecution[static_cast<size_t>(phase)].record(executionNanoseconds);
 		}
 
+		void recordFloorDirtyEvent(size_t currentDirtyTiles)
+		{
+			if (!enabled) {
+				return;
+			}
+
+			++floorDirtyMarks;
+			floorDirtyTilesMax = std::max<uint64_t>(floorDirtyTilesMax, currentDirtyTiles);
+		}
+
+		void recordCheckpointGroupSaved(size_t tiles, size_t players)
+		{
+			if (!enabled) {
+				return;
+			}
+
+			++floorCheckpointGroupsSaved;
+			floorCheckpointMaxTiles = std::max<uint64_t>(floorCheckpointMaxTiles, tiles);
+			floorCheckpointMaxPlayers = std::max<uint64_t>(floorCheckpointMaxPlayers, players);
+		}
+
+		void recordCheckpointTileQueries(size_t count)
+		{
+			if (!enabled) {
+				return;
+			}
+
+			floorCheckpointTileQueries += count;
+		}
+
+		void recordActorAttributionQueued(size_t pendingCount)
+		{
+			if (!enabled) {
+				return;
+			}
+
+			actorAttributionsPendingMax = std::max<uint64_t>(actorAttributionsPendingMax, pendingCount);
+		}
+
+		void recordActorAttributionsResolved(uint32_t count)
+		{
+			if (!enabled) {
+				return;
+			}
+
+			actorAttributionsResolved += count;
+		}
+
 	private:
 		void flushWindow(std::chrono::steady_clock::time_point now, bool force)
 		{
@@ -365,6 +442,14 @@ class DispatcherMetrics {
 			for (size_t i = 0; i < DISPATCHER_PHASE_COUNT; ++i) {
 				row.phases[i] = phaseExecution[i].summarize();
 			}
+			row.floorDirtyMarks = floorDirtyMarks;
+			row.floorDirtyTilesMax = floorDirtyTilesMax;
+			row.floorCheckpointGroupsSaved = floorCheckpointGroupsSaved;
+			row.floorCheckpointMaxTiles = floorCheckpointMaxTiles;
+			row.floorCheckpointMaxPlayers = floorCheckpointMaxPlayers;
+			row.floorCheckpointTileQueries = floorCheckpointTileQueries;
+			row.actorAttributionsPendingMax = actorAttributionsPendingMax;
+			row.actorAttributionsResolved = actorAttributionsResolved;
 
 			{
 				std::lock_guard<std::mutex> lock(queueMutex);
@@ -386,6 +471,14 @@ class DispatcherMetrics {
 			dispatcherBusyNanoseconds = 0;
 			successfulLogins = 0;
 			failedLogins = 0;
+			floorDirtyMarks = 0;
+			floorDirtyTilesMax = 0;
+			floorCheckpointGroupsSaved = 0;
+			floorCheckpointMaxTiles = 0;
+			floorCheckpointMaxPlayers = 0;
+			floorCheckpointTileQueries = 0;
+			actorAttributionsPendingMax = 0;
+			actorAttributionsResolved = 0;
 			windowStartedAt = now;
 		}
 
@@ -418,6 +511,11 @@ class DispatcherMetrics {
 					       << ',' << phaseName << "_p99_us"
 					       << ',' << phaseName << "_max_us";
 				}
+				output << ",floor_dirty_marks,floor_dirty_tiles_max,"
+				          "floor_checkpoint_groups_saved,floor_checkpoint_max_tiles,"
+				          "floor_checkpoint_max_players,floor_checkpoint_tile_queries,"
+				          "actor_attributions_pending_max,"
+				          "actor_attributions_resolved";
 				output << '\n';
 				output.flush();
 			}
@@ -494,6 +592,14 @@ class DispatcherMetrics {
 						       << ',' << phase.p99Microseconds
 						       << ',' << phase.maximumMicroseconds;
 					}
+					output << ',' << row.floorDirtyMarks
+					       << ',' << row.floorDirtyTilesMax
+					       << ',' << row.floorCheckpointGroupsSaved
+					       << ',' << row.floorCheckpointMaxTiles
+					       << ',' << row.floorCheckpointMaxPlayers
+					       << ',' << row.floorCheckpointTileQueries
+					       << ',' << row.actorAttributionsPendingMax
+					       << ',' << row.actorAttributionsResolved;
 					output << '\n';
 				}
 				output.flush();
@@ -519,6 +625,14 @@ class DispatcherMetrics {
 		uint64_t dispatcherBusyNanoseconds = 0;
 		uint64_t successfulLogins = 0;
 		uint64_t failedLogins = 0;
+		uint64_t floorDirtyMarks = 0;
+		uint64_t floorDirtyTilesMax = 0;
+		uint64_t floorCheckpointGroupsSaved = 0;
+		uint64_t floorCheckpointMaxTiles = 0;
+		uint64_t floorCheckpointMaxPlayers = 0;
+		uint64_t floorCheckpointTileQueries = 0;
+		uint64_t actorAttributionsPendingMax = 0;
+		uint64_t actorAttributionsResolved = 0;
 
 		std::mutex queueMutex;
 		std::condition_variable queueSignal;
@@ -564,9 +678,72 @@ void recordDispatcherPhase(DispatcherMetricsPhase phase, uint64_t executionNanos
 	getDispatcherMetrics().recordPhase(phase, executionNanoseconds);
 }
 
+void recordDispatcherFloorDirtyEvent(size_t currentDirtyTiles)
+{
+	getDispatcherMetrics().recordFloorDirtyEvent(currentDirtyTiles);
+}
+
+void recordDispatcherCheckpointGroupSaved(size_t tiles, size_t players)
+{
+	getDispatcherMetrics().recordCheckpointGroupSaved(tiles, players);
+}
+
+void recordDispatcherCheckpointTileQueries(size_t count)
+{
+	getDispatcherMetrics().recordCheckpointTileQueries(count);
+}
+
+void recordDispatcherActorAttributionQueued(size_t pendingCount)
+{
+	getDispatcherMetrics().recordActorAttributionQueued(pendingCount);
+}
+
+void recordDispatcherActorAttributionsResolved(uint32_t count)
+{
+	getDispatcherMetrics().recordActorAttributionsResolved(count);
+}
+
+void recordDispatcherDatabaseLockWait(uint64_t waitNanoseconds)
+{
+	recordDispatcherPhase(DispatcherMetricsPhase::FLOOR_CHECKPOINT_DB_LOCK_WAIT, waitNanoseconds);
+}
+
+bool dispatcherDatabaseLockWaitRecordingActive()
+{
+	return databaseLockWaitRecordingActive && dispatcherMetricsEnabled();
+}
+
+DispatcherDatabaseLockWaitScope::DispatcherDatabaseLockWaitScope()
+	: previous(databaseLockWaitRecordingActive)
+{
+	databaseLockWaitRecordingActive = true;
+}
+
+DispatcherDatabaseLockWaitScope::~DispatcherDatabaseLockWaitScope()
+{
+	databaseLockWaitRecordingActive = previous;
+}
+
 bool dispatcherLogoutMetricsContextActive()
 {
 	return logoutMetricsContextActive && !dispatcherMetricsSuppressed;
+}
+
+bool dispatcherPlayerSaveMetricsContextActive()
+{
+	return (logoutMetricsContextActive || checkpointSaveMetricsContextActive) &&
+		!dispatcherMetricsSuppressed;
+}
+
+DispatcherCheckpointSaveMetricsContext::DispatcherCheckpointSaveMetricsContext()
+	: previous(checkpointSaveMetricsContextActive)
+{
+	checkpointSaveMetricsContextActive = true;
+}
+
+DispatcherCheckpointSaveMetricsContext::~DispatcherCheckpointSaveMetricsContext()
+{
+	checkpointSaveMetricsContextActive = previous;
 }
 
 DispatcherMetricsSuppressionScope::DispatcherMetricsSuppressionScope()

@@ -60,6 +60,25 @@ enum class DispatcherMetricsPhase : uint8_t {
 	LOGOUT_SAVE_STORAGE,
 	LOGOUT_SAVE_COMMIT,
 	LOGOUT_VIP_NOTIFY,
+	ITEM_MOVE_TOTAL,
+	ITEM_MOVE_PERSISTENCE,
+	FLOOR_SNAPSHOT_TICK,
+	FLOOR_SNAPSHOT_PREPARE,
+	FLOOR_CHECKPOINT_GROUP,
+	FLOOR_CHECKPOINT_PLAYER_SAVE,
+	FLOOR_CHECKPOINT_TX_BEGIN,
+	FLOOR_CHECKPOINT_HOUSE_SAVE,
+	FLOOR_CHECKPOINT_TILE_SQL,
+	FLOOR_CHECKPOINT_MARKER_SQL,
+	FLOOR_CHECKPOINT_CLEAN_SAVE_SQL,
+	FLOOR_CHECKPOINT_TX_COMMIT,
+	FLOOR_CHECKPOINT_DB_LOCK_WAIT,
+	ITEM_ACTOR_ATTRIBUTION,
+	ITEM_MOVE_STAMP,
+	ITEM_MOVE_IDENTIFY,
+	ITEM_MOVE_ATTR_ENDPOINT,
+	ITEM_MOVE_ATTR_PATH,
+	ITEM_MOVE_CHECKPOINT_REG,
 	COUNT
 };
 
@@ -69,7 +88,39 @@ void recordDispatcherTask(uint64_t queueWaitNanoseconds, uint64_t executionNanos
 void recordDispatcherBatch(uint64_t executionNanoseconds, size_t tasks, size_t executed, size_t expired);
 void recordDispatcherLogin(uint64_t executionNanoseconds, bool successful);
 void recordDispatcherPhase(DispatcherMetricsPhase phase, uint64_t executionNanoseconds);
+void recordDispatcherFloorDirtyEvent(size_t currentDirtyTiles);
+void recordDispatcherCheckpointGroupSaved(size_t tiles, size_t players);
+void recordDispatcherCheckpointTileQueries(size_t count);
+void recordDispatcherActorAttributionQueued(size_t pendingCount);
+void recordDispatcherActorAttributionsResolved(uint32_t count);
+void recordDispatcherDatabaseLockWait(uint64_t waitNanoseconds);
+bool dispatcherDatabaseLockWaitRecordingActive();
 bool dispatcherLogoutMetricsContextActive();
+bool dispatcherPlayerSaveMetricsContextActive();
+
+class DispatcherDatabaseLockWaitScope {
+	public:
+		DispatcherDatabaseLockWaitScope();
+		~DispatcherDatabaseLockWaitScope();
+
+		DispatcherDatabaseLockWaitScope(const DispatcherDatabaseLockWaitScope&) = delete;
+		DispatcherDatabaseLockWaitScope& operator=(const DispatcherDatabaseLockWaitScope&) = delete;
+
+	private:
+		bool previous = false;
+};
+
+class DispatcherCheckpointSaveMetricsContext {
+	public:
+		DispatcherCheckpointSaveMetricsContext();
+		~DispatcherCheckpointSaveMetricsContext();
+
+		DispatcherCheckpointSaveMetricsContext(const DispatcherCheckpointSaveMetricsContext&) = delete;
+		DispatcherCheckpointSaveMetricsContext& operator=(const DispatcherCheckpointSaveMetricsContext&) = delete;
+
+	private:
+		bool previous = false;
+};
 
 class DispatcherMetricsSuppressionScope {
 	public:

@@ -91,6 +91,80 @@ subfases, pois isso contaria o mesmo tempo duas vezes.
 Os totais de logout também se sobrepõem às subfases. Use as subfases para
 explicar o total, não para somar todos os campos indiscriminadamente.
 
+## Fases da persistência de itens/floor (baseline)
+
+- `item_move_total`: execução completa de `Game::internalMoveItem`.
+- `item_move_persistence`: soma dos trechos de persistência dentro do
+  `internalMoveItem` (stamps de actor, identificação de containers,
+  atribuição e registro de checkpoint group). Está contida em
+  `item_move_total`; não some as duas.
+- `item_move_stamp`: `stampFloorPersistenceActorAfterPlayerMutation`
+  (qualquer caller).
+- `item_move_identify`: `identifyFloorPersistenceMovableContainerAfterPlayerMutation`
+  — inclui a re-identificação recursiva da subtree do container móvel
+  (`markAsPlayerMovedForFloorPersistence`).
+- `item_move_attr_endpoint`: `attributeSuccessfulItemEndpoint` — inclui
+  varreduras `isHoldingItem` e enfileiramento de atribuição de actor.
+- `item_move_attr_path`: `attributeContainerPathAfterMutation` — idem.
+- `item_move_checkpoint_reg`: `registerFloorCheckpointTransfer` (resolução de
+  endpoints e merge de checkpoint groups).
+  As cinco subfases medem as funções onde quer que sejam chamadas (move,
+  mail, trade); em janelas sem mail/trade a soma aproxima
+  `item_move_persistence`.
+- `floor_snapshot_tick`: execução de `Game::processFloorSnapshots` (tick de
+  1 s e flushes forçados). Contém `floor_checkpoint_group` e
+  `floor_snapshot_prepare`.
+- `floor_snapshot_prepare`: preparação de um snapshot no Dispatcher
+  (serialização do tile, escape do blob e montagem do UPSERT). Medida nos
+  dois caminhos: `queueFloorSnapshot` (tile isolado, execução async via
+  `g_databaseTasks`) e `prepareFloorSnapshot` (checkpoint group, execução
+  síncrona na transação).
+- `floor_checkpoint_group`: execução completa de
+  `Game::executeFloorCheckpointGroup`, incluindo a transação síncrona no
+  Dispatcher. Contém `floor_snapshot_prepare` e todas as fases
+  `floor_checkpoint_*` abaixo.
+- `floor_checkpoint_player_save`: cada `IOLoginData::savePlayerData`
+  executado dentro da transação de checkpoint. Em contexto de logout também
+  aparece dentro das fases `logout_save_*`. Quando chamado por checkpoint,
+  as subfases `logout_save_core`, `logout_save_spells`,
+  `logout_save_inventory`, `logout_inventory_*`, `logout_save_depot` e
+  `logout_save_storage` também são gravadas (contexto de medição generalizado
+  para logout OU checkpoint; cada save é medido uma única vez, sem dupla
+  contagem). Janelas com saves de logout e de checkpoint misturam amostras
+  nas mesmas fases.
+- `floor_checkpoint_tx_begin`: begin da transação do checkpoint.
+- `floor_checkpoint_house_save`: cada `IOMapSerialize::saveHouseData`
+  executado dentro da transação de checkpoint.
+- `floor_checkpoint_tile_sql`: execução dos UPSERTs dos snapshots dos tiles
+  (e o DELETE do reset semanal de floor, quando esse caminho raro ocorre).
+- `floor_checkpoint_marker_sql`: INSERT em `floor_persistence_checkpoints`.
+- `floor_checkpoint_clean_save_sql`: UPDATE de CLEAN_COMMITTED da sessão de
+  clean save, quando esse caminho existe.
+- `floor_checkpoint_tx_commit`: commit da transação do checkpoint.
+- `floor_checkpoint_db_lock_wait`: tempo gasto aguardando o lock da conexão
+  única de banco (`Database::databaseLock`) durante o caminho de checkpoint
+  (preparação + transação). Está contido nas demais fases; distingue espera
+  por contenção (ex.: thread assíncrona de snapshots) de tempo de execução
+  no MariaDB.
+- `item_actor_attribution`: processamento debounced das atribuições de actor
+  pendentes (normalização de subtree + certificação de ancestrais). Medido
+  apenas quando há atribuições pendentes.
+
+Contadores agregados adicionais por janela:
+
+- `floor_dirty_marks`: eventos de dirty-marking de tiles aceitos.
+- `floor_dirty_tiles_max`: maior quantidade de tiles dirty pendentes.
+- `floor_checkpoint_groups_saved`: checkpoint groups concluídos.
+- `floor_checkpoint_max_tiles`: maior número de tiles salvos em um único
+  checkpoint group na janela.
+- `floor_checkpoint_max_players`: maior número de players salvos em um único
+  checkpoint group na janela.
+- `floor_checkpoint_tile_queries`: UPSERTs de tiles executados dentro de
+  transações de checkpoint.
+- `actor_attributions_pending_max`: maior fila de atribuições de actor
+  pendentes.
+- `actor_attributions_resolved`: atribuições de actor resolvidas.
+
 ## Instrumentação removida
 
 As medições internas de movimento e espectadores foram removidas depois de
