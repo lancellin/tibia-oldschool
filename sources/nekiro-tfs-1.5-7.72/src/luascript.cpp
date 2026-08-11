@@ -2496,11 +2496,16 @@ void LuaScriptInterface::registerFunctions()
 	registerMethod("Player", "getSkullTime", LuaScriptInterface::luaPlayerGetSkullTime);
 	registerMethod("Player", "setSkullTime", LuaScriptInterface::luaPlayerSetSkullTime);
 	registerMethod("Player", "getDeathPenalty", LuaScriptInterface::luaPlayerGetDeathPenalty);
+	registerMethod("Player", "willBeRookedOnDeath", LuaScriptInterface::luaPlayerWillBeRookedOnDeath);
 
 	registerMethod("Player", "getExperience", LuaScriptInterface::luaPlayerGetExperience);
 	registerMethod("Player", "addExperience", LuaScriptInterface::luaPlayerAddExperience);
 	registerMethod("Player", "removeExperience", LuaScriptInterface::luaPlayerRemoveExperience);
 	registerMethod("Player", "getLevel", LuaScriptInterface::luaPlayerGetLevel);
+	registerMethod("Player", "getAlchemyLevel", LuaScriptInterface::luaPlayerGetAlchemyLevel);
+	registerMethod("Player", "getAlchemyTries", LuaScriptInterface::luaPlayerGetAlchemyTries);
+	registerMethod("Player", "getAlchemyPercent", LuaScriptInterface::luaPlayerGetAlchemyPercent);
+	registerMethod("Player", "addAlchemyTries", LuaScriptInterface::luaPlayerAddAlchemyTries);
 
 	registerMethod("Player", "getMagicLevel", LuaScriptInterface::luaPlayerGetMagicLevel);
 	registerMethod("Player", "getBaseMagicLevel", LuaScriptInterface::luaPlayerGetBaseMagicLevel);
@@ -4568,6 +4573,7 @@ int LuaScriptInterface::luaGameGetFloorSnapshotStats(lua_State* L)
 	setField(L, "checkpointPlayersSaved", runtime.checkpointPlayersSaved);
 	setField(L, "checkpointHousesSaved", runtime.checkpointHousesSaved);
 	setField(L, "checkpointTilesSaved", runtime.checkpointTilesSaved);
+	setField(L, "checkpointStuckAlerts", runtime.checkpointStuckAlerts);
 	setField(L, "saveSessionId", g_game.getFloorPersistenceSessionId());
 	setField(L, "saveSessionState", g_game.getFloorPersistenceSessionState());
 	setField(L, "lastSuccessAt", runtime.lastSuccessAt);
@@ -9406,6 +9412,66 @@ int LuaScriptInterface::luaPlayerAddSpecialSkill(lua_State* L)
 	player->setVarSpecialSkill(specialSkillType, getNumber<int32_t>(L, 3));
 	player->sendSkills();
 	pushBoolean(L, true);
+	return 1;
+}
+
+int LuaScriptInterface::luaPlayerGetAlchemyLevel(lua_State* L)
+{
+	// player:getAlchemyLevel()
+	Player* player = getUserdata<Player>(L, 1);
+	if (player) {
+		lua_pushnumber(L, player->getAlchemyLevel());
+	} else {
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+int LuaScriptInterface::luaPlayerGetAlchemyTries(lua_State* L)
+{
+	// player:getAlchemyTries()
+	Player* player = getUserdata<Player>(L, 1);
+	if (player) {
+		lua_pushnumber(L, player->getAlchemyTries());
+	} else {
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+int LuaScriptInterface::luaPlayerGetAlchemyPercent(lua_State* L)
+{
+	// player:getAlchemyPercent()
+	Player* player = getUserdata<Player>(L, 1);
+	if (player) {
+		lua_pushnumber(L, player->getAlchemyPercent());
+	} else {
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+int LuaScriptInterface::luaPlayerAddAlchemyTries(lua_State* L)
+{
+	// player:addAlchemyTries(tries)
+	Player* player = getUserdata<Player>(L, 1);
+	if (player) {
+		pushBoolean(L, player->addAlchemyTries(getNumber<uint64_t>(L, 2)));
+	} else {
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+int LuaScriptInterface::luaPlayerWillBeRookedOnDeath(lua_State* L)
+{
+	// player:willBeRookedOnDeath()
+	Player* player = getUserdata<Player>(L, 1);
+	if (player) {
+		pushBoolean(L, player->willBeRookedOnDeath());
+	} else {
+		lua_pushnil(L);
+	}
 	return 1;
 }
 

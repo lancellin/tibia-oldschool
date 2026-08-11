@@ -23,6 +23,8 @@ namespace {
 
 constexpr size_t DISPATCHER_PHASE_COUNT = static_cast<size_t>(DispatcherMetricsPhase::COUNT);
 
+constexpr size_t CHECKPOINT_FAILURE_KIND_COUNT = static_cast<size_t>(CheckpointGroupFailureKind::COUNT);
+
 constexpr std::array<const char*, DISPATCHER_PHASE_COUNT> DISPATCHER_PHASE_NAMES = {
 	"login_preload",
 	"login_policy",
@@ -87,6 +89,12 @@ constexpr std::array<const char*, DISPATCHER_PHASE_COUNT> DISPATCHER_PHASE_NAMES
 	"item_move_attr_endpoint",
 	"item_move_attr_path",
 	"item_move_checkpoint_reg",
+	"floor_checkpoint_capture",
+	"floor_checkpoint_worker_total",
+	"floor_checkpoint_worker_begin",
+	"floor_checkpoint_worker_sql",
+	"floor_checkpoint_worker_commit",
+	"floor_checkpoint_drain_wait",
 };
 
 thread_local bool logoutMetricsContextActive = false;
@@ -245,6 +253,15 @@ struct DispatcherMetricsRow {
 	uint64_t floorCheckpointTileQueries = 0;
 	uint64_t actorAttributionsPendingMax = 0;
 	uint64_t actorAttributionsResolved = 0;
+	uint64_t checkpointJobsQueued = 0;
+	uint64_t checkpointJobsCompleted = 0;
+	uint64_t checkpointJobsFailed = 0;
+	uint64_t checkpointQueueDepthMax = 0;
+	uint64_t checkpointDrains = 0;
+	uint64_t checkpointBackpressureSkips = 0;
+	uint64_t checkpointGroupFailuresTotal = 0;
+	std::array<uint64_t, CHECKPOINT_FAILURE_KIND_COUNT> checkpointGroupFailures{};
+	uint64_t checkpointStuckGroupsMax = 0;
 };
 
 class DispatcherMetrics {
@@ -409,6 +426,66 @@ class DispatcherMetrics {
 			actorAttributionsResolved += count;
 		}
 
+		void recordCheckpointJobQueued(size_t queueDepth)
+		{
+			if (!enabled) {
+				return;
+			}
+
+			++checkpointJobsQueued;
+			checkpointQueueDepthMax = std::max<uint64_t>(checkpointQueueDepthMax, queueDepth);
+		}
+
+		void recordCheckpointJobCompleted(bool success)
+		{
+			if (!enabled) {
+				return;
+			}
+
+			if (success) {
+				++checkpointJobsCompleted;
+			} else {
+				++checkpointJobsFailed;
+			}
+		}
+
+		void recordCheckpointDrain()
+		{
+			if (!enabled) {
+				return;
+			}
+
+			++checkpointDrains;
+		}
+
+		void recordCheckpointBackpressureSkip()
+		{
+			if (!enabled) {
+				return;
+			}
+
+			++checkpointBackpressureSkips;
+		}
+
+		void recordCheckpointGroupFailure(CheckpointGroupFailureKind kind)
+		{
+			if (!enabled) {
+				return;
+			}
+
+			++checkpointGroupFailuresTotal;
+			++checkpointGroupFailures[static_cast<size_t>(kind)];
+		}
+
+		void recordCheckpointStuckGroups(size_t count)
+		{
+			if (!enabled) {
+				return;
+			}
+
+			checkpointStuckGroupsMax = std::max<uint64_t>(checkpointStuckGroupsMax, count);
+		}
+
 	private:
 		void flushWindow(std::chrono::steady_clock::time_point now, bool force)
 		{
@@ -450,6 +527,15 @@ class DispatcherMetrics {
 			row.floorCheckpointTileQueries = floorCheckpointTileQueries;
 			row.actorAttributionsPendingMax = actorAttributionsPendingMax;
 			row.actorAttributionsResolved = actorAttributionsResolved;
+			row.checkpointJobsQueued = checkpointJobsQueued;
+			row.checkpointJobsCompleted = checkpointJobsCompleted;
+			row.checkpointJobsFailed = checkpointJobsFailed;
+			row.checkpointQueueDepthMax = checkpointQueueDepthMax;
+			row.checkpointDrains = checkpointDrains;
+			row.checkpointBackpressureSkips = checkpointBackpressureSkips;
+			row.checkpointGroupFailuresTotal = checkpointGroupFailuresTotal;
+			row.checkpointGroupFailures = checkpointGroupFailures;
+			row.checkpointStuckGroupsMax = checkpointStuckGroupsMax;
 
 			{
 				std::lock_guard<std::mutex> lock(queueMutex);
@@ -479,6 +565,15 @@ class DispatcherMetrics {
 			floorCheckpointTileQueries = 0;
 			actorAttributionsPendingMax = 0;
 			actorAttributionsResolved = 0;
+			checkpointJobsQueued = 0;
+			checkpointJobsCompleted = 0;
+			checkpointJobsFailed = 0;
+			checkpointQueueDepthMax = 0;
+			checkpointDrains = 0;
+			checkpointBackpressureSkips = 0;
+			checkpointGroupFailuresTotal = 0;
+			checkpointGroupFailures.fill(0);
+			checkpointStuckGroupsMax = 0;
 			windowStartedAt = now;
 		}
 
@@ -515,7 +610,19 @@ class DispatcherMetrics {
 				          "floor_checkpoint_groups_saved,floor_checkpoint_max_tiles,"
 				          "floor_checkpoint_max_players,floor_checkpoint_tile_queries,"
 				          "actor_attributions_pending_max,"
-				          "actor_attributions_resolved";
+				          "actor_attributions_resolved,"
+				          "checkpoint_jobs_queued,checkpoint_jobs_completed,"
+				          "checkpoint_jobs_failed,checkpoint_queue_depth_max,"
+				          "checkpoint_drains,checkpoint_backpressure_skips,"
+				          "checkpoint_group_failures_total,"
+				          "checkpoint_group_failures_participant_unavailable,"
+				          "checkpoint_group_failures_house_unavailable,"
+				          "checkpoint_group_failures_capture_failed,"
+				          "checkpoint_group_failures_serialization,"
+				          "checkpoint_group_failures_transaction,"
+				          "checkpoint_group_failures_worker,"
+				          "checkpoint_group_failures_worker_aborted,"
+				          "checkpoint_stuck_groups_max";
 				output << '\n';
 				output.flush();
 			}
@@ -599,7 +706,18 @@ class DispatcherMetrics {
 					       << ',' << row.floorCheckpointMaxPlayers
 					       << ',' << row.floorCheckpointTileQueries
 					       << ',' << row.actorAttributionsPendingMax
-					       << ',' << row.actorAttributionsResolved;
+					       << ',' << row.actorAttributionsResolved
+					       << ',' << row.checkpointJobsQueued
+					       << ',' << row.checkpointJobsCompleted
+					       << ',' << row.checkpointJobsFailed
+					       << ',' << row.checkpointQueueDepthMax
+					       << ',' << row.checkpointDrains
+					       << ',' << row.checkpointBackpressureSkips
+					       << ',' << row.checkpointGroupFailuresTotal;
+					for (const uint64_t failuresByKind : row.checkpointGroupFailures) {
+						output << ',' << failuresByKind;
+					}
+					output << ',' << row.checkpointStuckGroupsMax;
 					output << '\n';
 				}
 				output.flush();
@@ -633,6 +751,15 @@ class DispatcherMetrics {
 		uint64_t floorCheckpointTileQueries = 0;
 		uint64_t actorAttributionsPendingMax = 0;
 		uint64_t actorAttributionsResolved = 0;
+		uint64_t checkpointJobsQueued = 0;
+		uint64_t checkpointJobsCompleted = 0;
+		uint64_t checkpointJobsFailed = 0;
+		uint64_t checkpointQueueDepthMax = 0;
+		uint64_t checkpointDrains = 0;
+		uint64_t checkpointBackpressureSkips = 0;
+		uint64_t checkpointGroupFailuresTotal = 0;
+		std::array<uint64_t, CHECKPOINT_FAILURE_KIND_COUNT> checkpointGroupFailures{};
+		uint64_t checkpointStuckGroupsMax = 0;
 
 		std::mutex queueMutex;
 		std::condition_variable queueSignal;
@@ -706,6 +833,36 @@ void recordDispatcherActorAttributionsResolved(uint32_t count)
 void recordDispatcherDatabaseLockWait(uint64_t waitNanoseconds)
 {
 	recordDispatcherPhase(DispatcherMetricsPhase::FLOOR_CHECKPOINT_DB_LOCK_WAIT, waitNanoseconds);
+}
+
+void recordDispatcherCheckpointJobQueued(size_t queueDepth)
+{
+	getDispatcherMetrics().recordCheckpointJobQueued(queueDepth);
+}
+
+void recordDispatcherCheckpointJobCompleted(bool success)
+{
+	getDispatcherMetrics().recordCheckpointJobCompleted(success);
+}
+
+void recordDispatcherCheckpointDrain()
+{
+	getDispatcherMetrics().recordCheckpointDrain();
+}
+
+void recordDispatcherCheckpointBackpressureSkip()
+{
+	getDispatcherMetrics().recordCheckpointBackpressureSkip();
+}
+
+void recordDispatcherCheckpointGroupFailure(CheckpointGroupFailureKind kind)
+{
+	getDispatcherMetrics().recordCheckpointGroupFailure(kind);
+}
+
+void recordDispatcherCheckpointStuckGroups(size_t count)
+{
+	getDispatcherMetrics().recordCheckpointStuckGroups(count);
 }
 
 bool dispatcherDatabaseLockWaitRecordingActive()

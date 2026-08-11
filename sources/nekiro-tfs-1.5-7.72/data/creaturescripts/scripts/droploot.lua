@@ -3,6 +3,16 @@ function onDeath(player, corpse, killer, mostDamageKiller, lastHitUnjustified, m
 		return true
 	end
 
+	if player:willBeRookedOnDeath() then
+		for i = CONST_SLOT_HEAD, CONST_SLOT_AMMO do
+			local item = player:getSlotItem(i)
+			if item then
+				item:remove()
+			end
+		end
+		return true
+	end
+
 	local amulet = player:getSlotItem(CONST_SLOT_NECKLACE)
 	local isRedSkull = player:getSkull() == SKULL_RED
 	if amulet and amulet.itemid == ITEM_AMULETOFLOSS and not isRedSkull then

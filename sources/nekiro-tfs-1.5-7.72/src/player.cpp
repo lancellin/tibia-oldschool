@@ -52,6 +52,32 @@ namespace {
 constexpr const char* OPEN_CONTAINER_RESTORE_ATTR = "redemption_open_container";
 constexpr int64_t OPEN_CONTAINER_RESTORE_ATTR_VERSION = 1;
 
+// These values mirror the active character-creation defaults in schema.sql and
+// the Account Clerk's Rookgaard destination.
+constexpr uint32_t ROOKING_LEVEL_THRESHOLD = 6;
+constexpr uint32_t INITIAL_PLAYER_LEVEL = 1;
+constexpr uint64_t INITIAL_PLAYER_EXPERIENCE = 0;
+constexpr int32_t INITIAL_PLAYER_HEALTH = 150;
+constexpr uint32_t INITIAL_PLAYER_MANA = 0;
+constexpr uint32_t INITIAL_PLAYER_CAPACITY = 40000;
+constexpr uint16_t INITIAL_PLAYER_SOUL = 0;
+constexpr uint16_t INITIAL_PLAYER_STAMINA = 2520;
+constexpr int32_t INITIAL_PLAYER_OFFLINE_TRAINING_TIME = 12 * 60 * 60 * 1000;
+constexpr int32_t INITIAL_PLAYER_OFFLINE_TRAINING_SKILL = -1;
+constexpr uint16_t INITIAL_FEMALE_LOOKTYPE = 136;
+constexpr uint16_t INITIAL_MALE_LOOKTYPE = 128;
+constexpr uint32_t ROOKGAARD_TOWN_ID = 11;
+
+bool shouldUseNoVocationLevelGain(uint32_t currentLevel, const Vocation* vocation)
+{
+	if (currentLevel != ROOKING_LEVEL_THRESHOLD || !vocation) {
+		return false;
+	}
+
+	const uint32_t baseVocation = vocation->getFromVocation();
+	return baseVocation == 1 || baseVocation == 2;
+}
+
 void removeOpenContainerRestoreAttr(Item* item)
 {
 	if (!item) {
@@ -379,6 +405,109 @@ bool Player::setVocation(uint16_t vocId)
 	vocation = voc;
 
 	updateRegeneration();
+	return true;
+}
+
+bool Player::willBeRookedOnDeath() const
+{
+	if (!skillLoss || !vocation || vocation->getId() == VOCATION_NONE || level < ROOKING_LEVEL_THRESHOLD) {
+		return false;
+	}
+
+	const uint64_t expLoss = getLostExperience();
+	if (expLoss == 0 || expLoss > experience) {
+		return false;
+	}
+
+	const uint64_t remainingExperience = experience - expLoss;
+	uint32_t resultingLevel = level;
+	while (resultingLevel > 1 && remainingExperience < Player::getExpForLevel(resultingLevel)) {
+		--resultingLevel;
+	}
+	return resultingLevel < ROOKING_LEVEL_THRESHOLD;
+}
+
+bool Player::resetToRookgaard()
+{
+	Town* rookgaardTown = g_game.map.towns.getTown(ROOKGAARD_TOWN_ID);
+	if (!rookgaardTown || !setVocation(VOCATION_NONE)) {
+		std::cout << "[Error - Player::resetToRookgaard] Missing no vocation or Rookgaard town."
+		          << std::endl;
+		return false;
+	}
+
+	setTown(rookgaardTown);
+	loginPosition = rookgaardTown->getTemplePosition();
+	rookgaardResetPending = true;
+
+	for (int32_t slot = CONST_SLOT_FIRST; slot <= CONST_SLOT_LAST; ++slot) {
+		if (Item* item = inventory[slot]) {
+			if (g_game.internalRemoveItem(item) != RETURNVALUE_NOERROR) {
+				std::cout << "[Warning - Player::resetToRookgaard] Could not remove inventory item "
+				          << item->getID() << " from " << getName() << '.' << std::endl;
+			}
+		}
+	}
+
+	auto clearContainer = [this](Container* container) {
+		while (container && !container->getItemList().empty()) {
+			Item* item = container->getItemList().back();
+			if (g_game.internalRemoveItem(item) != RETURNVALUE_NOERROR) {
+				std::cout << "[Warning - Player::resetToRookgaard] Could not remove depot item "
+				          << item->getID() << " from " << getName() << '.' << std::endl;
+				break;
+			}
+		}
+	};
+	for (const auto& entry : depotLockerMap) {
+		clearContainer(entry.second.get());
+	}
+	for (const auto& entry : depotChests) {
+		clearContainer(entry.second);
+	}
+
+	storageMap.clear();
+	learnedInstantSpellList.clear();
+	charmStates.clear();
+	outfits.clear();
+
+	level = INITIAL_PLAYER_LEVEL;
+	experience = INITIAL_PLAYER_EXPERIENCE;
+	levelPercent = 0;
+
+	healthMax = INITIAL_PLAYER_HEALTH;
+	health = INITIAL_PLAYER_HEALTH;
+	manaMax = INITIAL_PLAYER_MANA;
+	mana = INITIAL_PLAYER_MANA;
+	capacity = INITIAL_PLAYER_CAPACITY;
+	soul = INITIAL_PLAYER_SOUL;
+	bankBalance = 0;
+	blessings.reset();
+	skull = SKULL_NONE;
+	skullTicks = 0;
+	offlineTrainingTime = INITIAL_PLAYER_OFFLINE_TRAINING_TIME;
+	offlineTrainingSkill = INITIAL_PLAYER_OFFLINE_TRAINING_SKILL;
+	staminaMinutes = INITIAL_PLAYER_STAMINA;
+	lastLoginSaved = 0;
+	lastIP = 0;
+	lastLogout = 0;
+	direction = DIRECTION_SOUTH;
+
+	defaultOutfit = Outfit_t{};
+	defaultOutfit.lookType = sex == PLAYERSEX_FEMALE ? INITIAL_FEMALE_LOOKTYPE : INITIAL_MALE_LOOKTYPE;
+	currentOutfit = defaultOutfit;
+
+	magLevel = 0;
+	manaSpent = 0;
+	magLevelPercent = 0;
+	for (Skill& skill : skills) {
+		skill = Skill{};
+	}
+	resetAlchemy();
+
+	updateBaseSpeed();
+	setBaseSpeed(getBaseSpeed());
+	g_game.changeSpeed(this, 0);
 	return true;
 }
 
@@ -830,6 +959,34 @@ void Player::addSkillAdvance(skills_t skill, uint64_t count)
 
 	if (sendUpdateSkills) {
 		sendSkills();
+	}
+}
+
+bool Player::addAlchemyTries(uint64_t count)
+{
+	if (!professions::addAlchemyTries(alchemyProgress, count)) {
+		return false;
+	}
+
+	sendProfessionData();
+	return true;
+}
+
+void Player::resetAlchemy()
+{
+	if (alchemyProgress.level == professions::ALCHEMY_INITIAL_LEVEL &&
+			alchemyProgress.tries == professions::ALCHEMY_INITIAL_TRIES) {
+		return;
+	}
+
+	alchemyProgress = professions::Progress{};
+	sendProfessionData();
+}
+
+void Player::sendProfessionData() const
+{
+	if (client) {
+		client->sendProfessionData();
 	}
 }
 
@@ -1667,7 +1824,8 @@ void Player::onRemoveCreature(Creature* creature, bool isLogout)
 			g_playerIOManager.isEnabled() &&
 			g_game.getGameState() == GAME_STATE_NORMAL &&
 			!g_game.isFloorCleanSaveWindowActive() &&
-			!g_game.hasFloorCheckpointForPlayer(guid);
+			!g_game.hasFloorCheckpointForPlayer(guid) &&
+			!g_game.hasInFlightCheckpointForPlayer(guid);
 
 		if (asynchronousLogout) {
 			const std::string playerName = getName();
@@ -2220,12 +2378,19 @@ void Player::addExperience(Creature* source, uint64_t exp, bool sendText/* = fal
 
 	uint32_t prevLevel = level;
 	while (experience >= nextLevelExp) {
+		const Vocation* levelGainVocation = vocation;
+		if (shouldUseNoVocationLevelGain(level, vocation)) {
+			if (Vocation* noVocation = g_vocations.getVocation(VOCATION_NONE)) {
+				levelGainVocation = noVocation;
+			}
+		}
+
 		++level;
-		healthMax += vocation->getHPGain();
-		health += vocation->getHPGain();
-		manaMax += vocation->getManaGain();
-		mana += vocation->getManaGain();
-		capacity += vocation->getCapGain();
+		healthMax += levelGainVocation->getHPGain();
+		health += levelGainVocation->getHPGain();
+		manaMax += levelGainVocation->getManaGain();
+		mana += levelGainVocation->getManaGain();
+		capacity += levelGainVocation->getCapGain();
 
 		currLevelExp = nextLevelExp;
 		nextLevelExp = Player::getExpForLevel(level + 1);
@@ -2559,15 +2724,19 @@ void Player::death(Creature* lastHitCreature)
 		if (expLoss != 0) {
 			uint32_t oldLevel = level;
 
-			if (vocation->getId() == VOCATION_NONE || level > 7) {
-				experience -= expLoss;
-			}
+			experience -= expLoss;
 
 			while (level > 1 && experience < Player::getExpForLevel(level)) {
 				--level;
 				healthMax = std::max<int32_t>(0, healthMax - vocation->getHPGain());
 				manaMax = std::max<int32_t>(0, manaMax - vocation->getManaGain());
 				capacity = std::max<int32_t>(0, capacity - vocation->getCapGain());
+			}
+
+			const bool shouldRook = vocation->getId() != VOCATION_NONE &&
+				oldLevel >= ROOKING_LEVEL_THRESHOLD && level < ROOKING_LEVEL_THRESHOLD;
+			if (shouldRook && resetToRookgaard()) {
+				sendTextMessage(MESSAGE_EVENT_ADVANCE, "You have been rooked and returned to Rookgaard.");
 			}
 
 			if (oldLevel != level) {

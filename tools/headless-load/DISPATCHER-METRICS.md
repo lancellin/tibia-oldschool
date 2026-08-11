@@ -164,6 +164,26 @@ Contadores agregados adicionais por janela:
 - `actor_attributions_pending_max`: maior fila de atribuições de actor
   pendentes.
 - `actor_attributions_resolved`: atribuições de actor resolvidas.
+- `checkpoint_group_failures_total`: falhas de checkpoint group na janela
+  (qualquer causa). Um valor persistente > 0 indica grupo preso/degradado.
+- `checkpoint_group_failures_participant_unavailable`: falhas porque um
+  participante do grupo não está mais em memória (causa típica de grupo
+  preso: saves mesclados ficam retidos até todos os participantes salvarem
+  juntos ou o servidor reiniciar).
+- `checkpoint_group_failures_house_unavailable`: falhas por house do grupo
+  indisponível em memória.
+- `checkpoint_group_failures_capture_failed`: falhas ao capturar o SQL de
+  save de player/house no Dispatcher.
+- `checkpoint_group_failures_serialization`: falhas de serialização de tile
+  (prepareFloorSnapshot).
+- `checkpoint_group_failures_transaction`: falhas na transação do checkpoint
+  síncrono (inclui falha simulada via `/floorsnapshot failnext`).
+- `checkpoint_group_failures_worker`: falhas de execução no checkpoint
+  worker.
+- `checkpoint_group_failures_worker_aborted`: jobs descartados porque a
+  thread do worker morreu antes de executá-los.
+- `checkpoint_stuck_groups_max`: maior número de checkpoint groups com 3+
+  falhas consecutivas (threshold de "stuck") em qualquer tick da janela.
 
 ## Instrumentação removida
 

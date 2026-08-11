@@ -367,6 +367,7 @@ ExtendedIds = {
     ContainerRestore = 8,
     BestiaryUnlock = 9,
     Advance = 10,
+    Professions = 11,
     PlayerShop = 202,
     CamForensics = 203
 }

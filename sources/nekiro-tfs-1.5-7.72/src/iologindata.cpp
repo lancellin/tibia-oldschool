@@ -41,7 +41,7 @@ std::string buildPlayerCoreQuery(const std::string& predicate)
 		"`looklegs`, `looktype`, `lookaddons`, `posx`, `posy`, `posz`, `cap`, "
 		"`lastlogin`, `lastlogout`, `lastip`, `conditions`, `skulltime`, `skull`, "
 		"`town_id`, `balance`, `offlinetraining_time`, `offlinetraining_skill`, "
-		"`stamina`, `skill_fist`, `skill_fist_tries`, `skill_club`, "
+		"`stamina`, `alchemy_level`, `alchemy_tries`, `skill_fist`, `skill_fist_tries`, `skill_club`, "
 		"`skill_club_tries`, `skill_sword`, `skill_sword_tries`, `skill_axe`, "
 		"`skill_axe_tries`, `skill_dist`, `skill_dist_tries`, `skill_shielding`, "
 		"`skill_shielding_tries`, `skill_fishing`, `skill_fishing_tries`, "
@@ -486,6 +486,9 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result, bool deferGuil
 	}
 
 	player->staminaMinutes = result->getNumber<uint16_t>("stamina");
+	player->alchemyProgress.level = result->getNumber<uint32_t>("alchemy_level");
+	player->alchemyProgress.tries = result->getNumber<uint64_t>("alchemy_tries");
+	professions::sanitizeAlchemyProgress(player->alchemyProgress);
 
 	static const std::string skillNames[] = {"skill_fist", "skill_club", "skill_sword", "skill_axe", "skill_dist", "skill_shielding", "skill_fishing"};
 	static const std::string skillNameTries[] = {"skill_fist_tries", "skill_club_tries", "skill_sword_tries", "skill_axe_tries", "skill_dist_tries", "skill_shielding_tries", "skill_fishing_tries"};
@@ -857,6 +860,23 @@ bool IOLoginData::savePlayer(Player* player)
 		}
 	};
 
+	// If a background checkpoint job captured this player's state is still
+	// queued or in flight, wait for it to commit first so this synchronous save
+	// (which writes newer state) is not overwritten by the older captured state.
+	// If the barrier cannot be satisfied within the limit, refuse to write the
+	// newer state: an older checkpoint could still commit afterwards and roll
+	// the player back. Failing this save is the safe bounded behavior; the
+	// group stays pending and is retried/recovered by the checkpoint machinery.
+	if (g_game.hasInFlightCheckpointForPlayer(player->getGUID())) {
+		if (!g_game.drainCheckpointWorker(30000)) {
+			std::cout << "[Warning - IOLoginData::savePlayer] player " << player->getGUID()
+			          << " has an in-flight checkpoint that did not finish in time; "
+			          << "refusing to save to preserve ordering." << std::endl;
+			releaseLegacyReservation();
+			return false;
+		}
+	}
+
 	if (!player->isOffline() && g_game.hasFloorCheckpointForPlayer(player->getGUID())) {
 		DispatcherPhaseMetricsTimer checkpointTimer(
 			DispatcherMetricsPhase::LOGOUT_SAVE_CHECKPOINT,
@@ -962,10 +982,12 @@ bool IOLoginData::savePlayerData(Player* player)
 
 	//serialize conditions
 	PropWriteStream propWriteStream;
-	for (Condition* condition : player->conditions) {
-		if (condition->isPersistent()) {
-			condition->serialize(propWriteStream);
-			propWriteStream.write<uint8_t>(CONDITIONATTR_END);
+	if (!player->rookgaardResetPending) {
+		for (Condition* condition : player->conditions) {
+			if (condition->isPersistent()) {
+				condition->serialize(propWriteStream);
+				propWriteStream.write<uint8_t>(CONDITIONATTR_END);
+			}
 		}
 	}
 
@@ -1002,11 +1024,15 @@ bool IOLoginData::savePlayerData(Player* player)
 	query << "`cap` = " << (player->capacity / 100) << ',';
 	query << "`sex` = " << static_cast<uint16_t>(player->sex) << ',';
 
-	if (player->lastLoginSaved != 0) {
+	if (player->rookgaardResetPending) {
+		query << "`lastlogin` = 0,";
+		query << "`lastip` = 0,";
+	} else if (player->lastLoginSaved != 0) {
 		query << "`lastlogin` = " << player->lastLoginSaved << ',';
-	}
-
-	if (player->lastIP != 0) {
+		if (player->lastIP != 0) {
+			query << "`lastip` = " << player->lastIP << ',';
+		}
+	} else if (player->lastIP != 0) {
 		query << "`lastip` = " << player->lastIP << ',';
 	}
 
@@ -1029,11 +1055,13 @@ bool IOLoginData::savePlayerData(Player* player)
 		query << "`skull` = " << static_cast<int64_t>(skull) << ',';
 	}
 
-	query << "`lastlogout` = " << player->getLastLogout() << ',';
+	query << "`lastlogout` = " << (player->rookgaardResetPending ? 0 : player->getLastLogout()) << ',';
 	query << "`balance` = " << player->bankBalance << ',';
 	query << "`offlinetraining_time` = " << player->getOfflineTrainingTime() / 1000 << ',';
 	query << "`offlinetraining_skill` = " << player->getOfflineTrainingSkill() << ',';
 	query << "`stamina` = " << player->getStaminaMinutes() << ',';
+	query << "`alchemy_level` = " << player->getAlchemyLevel() << ',';
+	query << "`alchemy_tries` = " << player->getAlchemyTries() << ',';
 
 	query << "`skill_fist` = " << player->skills[SKILL_FIST].level << ',';
 	query << "`skill_fist_tries` = " << player->skills[SKILL_FIST].tries << ',';
@@ -1051,7 +1079,9 @@ bool IOLoginData::savePlayerData(Player* player)
 	query << "`skill_fishing_tries` = " << player->skills[SKILL_FISHING].tries << ',';
 	query << "`direction` = " << static_cast<uint16_t> (player->getDirection()) << ',';
 
-	if (!player->isOffline()) {
+	if (player->rookgaardResetPending) {
+		query << "`onlinetime` = 0,";
+	} else if (!player->isOffline()) {
 		query << "`onlinetime` = `onlinetime` + " << (time(nullptr) - player->lastLoginSaved) << ',';
 	}
 	query << "`blessings` = " << player->blessings.to_ulong();
@@ -1061,6 +1091,21 @@ bool IOLoginData::savePlayerData(Player* player)
 		return false;
 	}
 	coreTimer.stop();
+
+	if (player->rookgaardResetPending) {
+		static constexpr const char* resetTables[] = {
+			"player_bestiary_progress",
+			"player_charms",
+			"player_inboxitems",
+			"player_storeinboxitems",
+			"guild_invites",
+		};
+		for (const char* table : resetTables) {
+			if (!db.executeQuery(fmt::format("DELETE FROM `{}` WHERE `player_id` = {:d}", table, player->getGUID()))) {
+				return false;
+			}
+		}
+	}
 
 	// learned spells
 	DispatcherPhaseMetricsTimer spellsTimer(
@@ -1145,7 +1190,7 @@ bool IOLoginData::savePlayerData(Player* player)
 		}
 	}
 
-	if (needsSave) {
+	if (needsSave || player->rookgaardResetPending) {
 		if (!db.executeQuery(fmt::format("DELETE FROM `player_depotlockeritems` WHERE `player_id` = {:d}", player->getGUID()))) {
 			return false;
 		}
@@ -1153,10 +1198,12 @@ bool IOLoginData::savePlayerData(Player* player)
 		DBInsert lockerQuery("INSERT INTO `player_depotlockeritems` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
 		itemList.clear();
 
-		for (const auto& it : player->depotLockerMap) {
-			for (Item* item : it.second->getItemList()) {
-				if (item->getID() != ITEM_DEPOT) {
-					itemList.emplace_back(it.first, item);
+		if (!player->rookgaardResetPending) {
+			for (const auto& it : player->depotLockerMap) {
+				for (Item* item : it.second->getItemList()) {
+					if (item->getID() != ITEM_DEPOT) {
+						itemList.emplace_back(it.first, item);
+					}
 				}
 			}
 		}
@@ -1166,7 +1213,7 @@ bool IOLoginData::savePlayerData(Player* player)
 		}
 
 		//save depot items
-		if (needsSave) {
+		if (needsSave || player->rookgaardResetPending) {
 			if (!db.executeQuery(fmt::format("DELETE FROM `player_depotitems` WHERE `player_id` = {:d}", player->getGUID()))) {
 				return false;
 			}
@@ -1174,9 +1221,11 @@ bool IOLoginData::savePlayerData(Player* player)
 			DBInsert depotQuery("INSERT INTO `player_depotitems` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
 			itemList.clear();
 
-			for (const auto& it : player->depotChests) {
-				for (Item* item : it.second->getItemList()) {
-					itemList.emplace_back(it.first, item);
+			if (!player->rookgaardResetPending) {
+				for (const auto& it : player->depotChests) {
+					for (Item* item : it.second->getItemList()) {
+						itemList.emplace_back(it.first, item);
+					}
 				}
 			}
 

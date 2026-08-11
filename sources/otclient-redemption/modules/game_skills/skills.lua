@@ -5,6 +5,32 @@ skillsButton = nil
 skillsSettings = nil
 local ExpRating = {}
 local smallSkillsCache = {}
+local alchemyProgress = { level = 10, percent = 0 }
+
+local function updateAlchemyWidget()
+    if not skillsWindow then
+        return
+    end
+
+    setSkillValue('professionAlchemy', alchemyProgress.level)
+    setSkillPercent('professionAlchemy', alchemyProgress.percent,
+        tr('You have %s percent to go', 100 - alchemyProgress.percent))
+end
+
+local function onProfessionData(protocol, opcode, buffer)
+    local version, profession, levelText, percentText =
+        buffer:match('^(%d+)|([%a_]+)|(%d+)|(%d+)$')
+    local level = tonumber(levelText)
+    local percent = tonumber(percentText)
+    if tonumber(version) ~= 1 or profession ~= 'alchemy' or not level or not percent or
+        level < 10 or percent < 0 or percent > 99 then
+        return
+    end
+
+    alchemyProgress.level = level
+    alchemyProgress.percent = percent
+    updateAlchemyWidget()
+end
 
 -- Cache for stats data when UI elements are hidden
 local statsCache = {
@@ -71,6 +97,7 @@ local function setupUIButtons()
 end
 
 function skillController:onInit()
+    ProtocolGame.registerExtendedOpcode(ExtendedIds.Professions, onProfessionData)
     skillController:registerEvents(LocalPlayer, {
         onExperienceChange = onExperienceChange,
         onLevelChange = onLevelChange,
@@ -125,6 +152,7 @@ function skillController:onInit()
 end
 
 function skillController:onTerminate()
+    ProtocolGame.unregisterExtendedOpcode(ExtendedIds.Professions)
     Keybind.delete("Windows", "Show/hide skills windows")
     skillsWindow:destroy()
     skillsButton:destroy()
@@ -149,7 +177,7 @@ local SKILL_GROUPS = {
     },
     individual = {
         'level', 'stamina', 'offlineTraining', 'magiclevel', 'skillId0', 'skillId1', 
-        'skillId2', 'skillId3', 'skillId4', 'skillId5', 'skillId6'
+        'skillId2', 'skillId3', 'skillId4', 'skillId5', 'skillId6', 'professionAlchemy'
     },
     GameAdditionalSkills = {
         'skillId7', 'skillId8', 'skillId9', 'skillId10', 'skillId11', 'skillId12'
@@ -360,7 +388,8 @@ function onSkillsMenuAction(actionId)
             showAxe = 'skillId3',
             showDistance = 'skillId4',
             showShielding = 'skillId5',
-            showFishing = 'skillId6'
+            showFishing = 'skillId6',
+            showAlchemy = 'professionAlchemy'
         }
         local skillId = skillMap[actionId]
         if skillId then
@@ -381,7 +410,8 @@ function getSkillVisibilityState(actionId)
         showAxe = 'skillId3',
         showDistance = 'skillId4',
         showShielding = 'skillId5',
-        showFishing = 'skillId6'
+        showFishing = 'skillId6',
+        showAlchemy = 'professionAlchemy'
     }
     
     local groupMap = {
@@ -779,6 +809,7 @@ end
 function skillController:onGameStart()
     skillsWindow:setupOnStart()
     refresh()
+    updateAlchemyWidget()
 
     local newWindowButton = skillsWindow:recursiveGetChildById('newWindowButton')
     if g_game.getClientVersion() < 1310 and newWindowButton then
@@ -943,6 +974,9 @@ local function resetTable(t)
 end
 
 function skillController:onGameEnd()
+    alchemyProgress.level = 10
+    alchemyProgress.percent = 0
+    updateAlchemyWidget()
     skillsWindow:setParent(nil, true)
     if expSpeedEvent then
         expSpeedEvent:cancel()

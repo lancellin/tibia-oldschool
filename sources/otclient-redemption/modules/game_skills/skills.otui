@@ -287,7 +287,22 @@ MiniWindow
         image-size: 9 9
       SkillPercentPanel
       margin-bottom: 5
-        
+
+    HorizontalSeparator
+      id: separadorOnProfessions
+      margin-bottom: 5
+
+    SkillButton
+      id: professionAlchemy
+      SkillNameLabel
+        !text: tr('Alchemy')
+      SkillValueLabel
+      ImageSkill
+        image-source: /images/icons/icon_magic
+        image-size: 9 9
+      SkillPercentPanel
+      margin-bottom: 5
+
     HorizontalSeparator
       id: separadorOnOffenceInfoChange
       margin-bottom: 5
@@ -693,6 +708,10 @@ SkillsListSubMenu < PopupMenu
   SkillsSubMenuOption
     id: showFishing
     !text: tr('Fishing')
+
+  SkillsSubMenuOption
+    id: showAlchemy
+    !text: tr('Alchemy')
 
   HorizontalSeparator
     id: HorizontalSeparator

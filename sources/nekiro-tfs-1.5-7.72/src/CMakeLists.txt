@@ -6,6 +6,7 @@ set(tfs_SRC
 	${CMAKE_CURRENT_LIST_DIR}/bed.cpp
 	${CMAKE_CURRENT_LIST_DIR}/camforensics.cpp
 	${CMAKE_CURRENT_LIST_DIR}/chat.cpp
+	${CMAKE_CURRENT_LIST_DIR}/checkpointworker.cpp
 	${CMAKE_CURRENT_LIST_DIR}/combat.cpp
 	${CMAKE_CURRENT_LIST_DIR}/condition.cpp
 	${CMAKE_CURRENT_LIST_DIR}/configmanager.cpp
@@ -51,6 +52,7 @@ set(tfs_SRC
 	${CMAKE_CURRENT_LIST_DIR}/outputmessage.cpp
 	${CMAKE_CURRENT_LIST_DIR}/party.cpp
 	${CMAKE_CURRENT_LIST_DIR}/player.cpp
+	${CMAKE_CURRENT_LIST_DIR}/professions.cpp
 	${CMAKE_CURRENT_LIST_DIR}/playerioclient.cpp
 	${CMAKE_CURRENT_LIST_DIR}/playeriodatabase.cpp
 	${CMAKE_CURRENT_LIST_DIR}/playeriomanager.cpp

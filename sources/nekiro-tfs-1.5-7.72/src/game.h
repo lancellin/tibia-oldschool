@@ -33,6 +33,7 @@
 #include "wildcardtree.h"
 #include "quests.h"
 #include "floorpersistence.h"
+#include "dispatchermetrics.h"
 
 #include <set>
 
@@ -149,6 +150,7 @@ struct FloorSnapshotStats {
 	uint64_t checkpointPlayersSaved = 0;
 	uint64_t checkpointHousesSaved = 0;
 	uint64_t checkpointTilesSaved = 0;
+	uint64_t checkpointStuckAlerts = 0;
 	int64_t lastSuccessAt = 0;
 	std::string lastError;
 };
@@ -165,6 +167,10 @@ struct FloorCheckpointGroup {
 	int64_t retryNotBefore = 0;
 	uint32_t retryCount = 0;
 	std::string lastError;
+	// True while a background checkpoint job captured from this group is
+	// queued or executing in the checkpoint worker. New mutations must not
+	// merge into an in-flight group; they form a fresh group instead.
+	bool workerInFlight = false;
 };
 
 struct PendingItemActorAttribution {
@@ -619,7 +625,16 @@ class Game
 			return floorCheckpointGroups.size();
 		}
 		bool hasFloorCheckpointForPlayer(uint32_t playerGuid) const;
+		bool hasInFlightCheckpointForPlayer(uint32_t playerGuid) const;
 		bool saveFloorCheckpointForPlayer(Player* player);
+		// Blocks the Dispatcher until every queued/in-flight background
+		// checkpoint job has committed and its bookkeeping was applied. Used by
+		// the synchronous checkpoint/save paths so they never race an in-flight
+		// background job for the same players/tiles.
+		bool drainCheckpointWorker(uint32_t timeoutMs);
+		// Detects an unexpectedly dead checkpoint worker thread and releases any
+		// reservations/groups it left behind, so nothing stays stuck forever.
+		void recoverDeadCheckpointWorker();
 		bool beginFloorPersistenceCleanSave(bool resetFloorSnapshots = false);
 		bool activateEmergency(uint32_t activatorGuid, const std::string& activatorName);
 		bool finishEmergency(uint32_t finisherGuid, const std::string& finisherName);
@@ -666,9 +681,7 @@ class Game
 			        isFloorCleanRestartReplayPending() || isFloorRecoveryBlocked());
 		}
 		uint32_t flushFloorSnapshots();
-		void simulateFloorSnapshotFailures(uint32_t count) {
-			floorSnapshotSimulatedFailures = count;
-		}
+		void simulateFloorSnapshotFailures(uint32_t count);
 		uint32_t getFloorSnapshotSimulatedFailures() const {
 			return floorSnapshotSimulatedFailures;
 		}
@@ -1021,6 +1034,17 @@ class Game
 		                          bool cityCleanupFiltered, uint64_t groupId, uint64_t groupVersion,
 		                          PreparedFloorSnapshot& prepared, std::string& error);
 		bool executeFloorCheckpointGroup(uint64_t groupId, Player* requiredPlayer = nullptr);
+		// Background (tick) checkpoint path: capture an immutable job from the
+		// group and hand it to the checkpoint worker. Returns false when the
+		// worker rejected the job (backpressure) or capture failed.
+		bool enqueueFloorCheckpointGroup(uint64_t groupId);
+		// Applies completed worker results (Dispatcher-side bookkeeping).
+		void processCheckpointResults();
+		// Central failure bookkeeping + alerting for checkpoint groups. Keeps
+		// the existing retry/backoff behavior unchanged.
+		void failFloorCheckpointGroup(FloorCheckpointGroup* group, const std::string& error,
+		                              CheckpointGroupFailureKind kind);
+		void releaseInFlightCheckpointPlayers(const std::set<uint32_t>& playerGuids);
 		bool executeFloorSnapshotsTransaction(const std::vector<PreparedFloorSnapshot>& snapshots,
 		                                      const std::vector<Player*>& checkpointPlayers,
 		                                      const std::vector<House*>& checkpointHouses, uint64_t groupId,
@@ -1101,6 +1125,10 @@ class Game
 		std::unordered_map<uint32_t, uint64_t> floorCheckpointPlayerGroups;
 		std::unordered_map<uint32_t, uint64_t> floorCheckpointHouseGroups;
 		std::unordered_map<std::string, uint64_t> floorCheckpointItemGroups;
+		// Reference count of players that currently belong to a queued or
+		// in-flight background checkpoint job. Used to keep asynchronous logout
+		// from racing an in-flight checkpoint save for the same player.
+		std::unordered_map<uint32_t, uint32_t> floorCheckpointInFlightPlayers;
 		uint64_t floorDirtySequence = 0;
 		uint64_t floorSnapshotVersionClock = 0;
 		uint64_t floorCheckpointGroupClock = 0;

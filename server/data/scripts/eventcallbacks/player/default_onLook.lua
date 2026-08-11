@@ -1,8 +1,16 @@
 local ec = EventCallback
+local CREATURE_STACK_ATTRIBUTE = "creaturestack"
 
 ec.onLook = function(self, thing, position, distance, description)
 	local description = "You see " .. thing:getDescription(distance)
-	if thing:isItem() and self:getAccountType() >= ACCOUNT_TYPE_GOD then
+	local accountType = self:getAccountType()
+	if thing:isItem() and thing:getId() == ITEM_GOLD_COIN and
+			(accountType == ACCOUNT_TYPE_GAMEMASTER or accountType == ACCOUNT_TYPE_GOD) then
+		local goldOrigin = thing:getCustomAttribute(CREATURE_STACK_ATTRIBUTE) == true and "creature" or "common"
+		description = string.format("%s\nGold origin: %s", description, goldOrigin)
+	end
+
+	if thing:isItem() and accountType >= ACCOUNT_TYPE_GOD then
 		local instanceId = thing:getFloorPersistenceInstanceId() or "none"
 		description = string.format("%s\nFloor instance ID: %s", description, instanceId)
 		local lastActorGuid = thing:getLastActorGuid() or 0

@@ -1,38 +1,51 @@
-local config = {}
+local CREATURE_STACK_ATTRIBUTE = "creaturestack"
+local MAX_CHANCE_BASIS_POINTS = 5000
+local BASE_CHANCE_BASIS_POINTS = 400
+local CHANCE_PER_ALCHEMY_LEVEL_BASIS_POINTS = 60
 
 local goldConverter = Action()
 
-function goldConverter.onUse(player, item, fromPosition, target, toPosition, isHotkey)
-	local coin = config[target.itemid]
+local function consumeCharge(item, charges)
+	if charges <= 1 then
+		item:remove()
+	else
+		item:transform(item:getId(), charges - 1)
+	end
+end
 
-	if not coin then
+function goldConverter.onUse(player, item, fromPosition, target, toPosition, isHotkey)
+	if not target or target:getId() ~= ITEM_GOLD_COIN or target:getCount() ~= 100 then
 		return false
 	end
 
 	local charges = item:getCharges()
-	if coin.changeTo and target.type == 100 then
-		target:remove()
-		player:addItem(coin.changeTo, 1)
-		item:transform(item:getId(), charges -1)
-	elseif coin.changeBack then
-		target:transform(target.itemid, target.type - 1)
-		player:addItem(coin.changeBack, 100)
-		item:transform(item:getId(), charges -1)
-	else
+	if charges <= 0 then
 		return false
 	end
 
-	if charges == 0 then
-		item:remove()
-	end
-	return true
-end
+	local isCreatureGold = target:getCustomAttribute(CREATURE_STACK_ATTRIBUTE) == true
+	local chance = math.min(MAX_CHANCE_BASIS_POINTS,
+		BASE_CHANCE_BASIS_POINTS + player:getAlchemyLevel() * CHANCE_PER_ALCHEMY_LEVEL_BASIS_POINTS)
+	if math.random(10000) <= chance then
+		target:transform(ITEM_PLATINUM_COIN, 1)
+		target:removeCustomAttribute(CREATURE_STACK_ATTRIBUTE)
 
-local currencyItems = Game.getCurrencyItems()
-for index, currency in pairs(currencyItems) do
-	local back, to = currencyItems[index-1], currencyItems[index+1]
-	local currencyId = currency:getId()
-	config[currencyId] = { changeBack = back and back:getId(), changeTo = to and to:getId() }
+		if target:getId() == ITEM_PLATINUM_COIN and target:getCount() == 1 and
+				target:getCustomAttribute(CREATURE_STACK_ATTRIBUTE) == nil then
+			if isCreatureGold then
+				player:addAlchemyTries(1)
+			end
+			player:getPosition():sendMagicEffect(CONST_ME_MAGIC_BLUE)
+		else
+			print("[Error - Gold Converter] Successful roll did not produce one common platinum coin.")
+			player:getPosition():sendMagicEffect(CONST_ME_POFF)
+		end
+	else
+		player:getPosition():sendMagicEffect(CONST_ME_POFF)
+	end
+
+	consumeCharge(item, charges)
+	return true
 end
 
 goldConverter:id(26378)

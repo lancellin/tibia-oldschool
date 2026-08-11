@@ -79,6 +79,23 @@ enum class DispatcherMetricsPhase : uint8_t {
 	ITEM_MOVE_ATTR_ENDPOINT,
 	ITEM_MOVE_ATTR_PATH,
 	ITEM_MOVE_CHECKPOINT_REG,
+	FLOOR_CHECKPOINT_CAPTURE,
+	FLOOR_CHECKPOINT_WORKER_TOTAL,
+	FLOOR_CHECKPOINT_WORKER_BEGIN,
+	FLOOR_CHECKPOINT_WORKER_SQL,
+	FLOOR_CHECKPOINT_WORKER_COMMIT,
+	FLOOR_CHECKPOINT_DRAIN_WAIT,
+	COUNT
+};
+
+enum class CheckpointGroupFailureKind : uint8_t {
+	PARTICIPANT_UNAVAILABLE,
+	HOUSE_UNAVAILABLE,
+	CAPTURE_FAILED,
+	SERIALIZATION,
+	TRANSACTION,
+	WORKER,
+	WORKER_ABORTED,
 	COUNT
 };
 
@@ -94,6 +111,12 @@ void recordDispatcherCheckpointTileQueries(size_t count);
 void recordDispatcherActorAttributionQueued(size_t pendingCount);
 void recordDispatcherActorAttributionsResolved(uint32_t count);
 void recordDispatcherDatabaseLockWait(uint64_t waitNanoseconds);
+void recordDispatcherCheckpointJobQueued(size_t queueDepth);
+void recordDispatcherCheckpointJobCompleted(bool success);
+void recordDispatcherCheckpointDrain();
+void recordDispatcherCheckpointBackpressureSkip();
+void recordDispatcherCheckpointGroupFailure(CheckpointGroupFailureKind kind);
+void recordDispatcherCheckpointStuckGroups(size_t count);
 bool dispatcherDatabaseLockWaitRecordingActive();
 bool dispatcherLogoutMetricsContextActive();
 bool dispatcherPlayerSaveMetricsContextActive();

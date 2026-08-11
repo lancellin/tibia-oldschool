@@ -517,6 +517,7 @@ bool Item::equals(const Item* otherItem) const
 	const ItemAttributes::CustomAttributeMap* otherCustomAttributes = otherAttributes ? otherAttributes->getCustomAttributeMap() : nullptr;
 	auto isComparableCustomAttribute = [](const std::string& key) {
 		return key != ITEM_CUSTOM_ATTRIBUTE_LOOT_DIFFICULTY &&
+		       key != ITEM_CUSTOM_ATTRIBUTE_CREATURE_STACK &&
 		       key != ITEM_CUSTOM_ATTRIBUTE_FLOOR_LAST_ACTOR_GUID;
 	};
 	auto countComparableCustomAttributes = [&isComparableCustomAttribute](

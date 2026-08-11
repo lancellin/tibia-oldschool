@@ -84,9 +84,10 @@ local function showStatus(player)
 		stats.staleCompletions, stats.lastSerializationMicros, timeText(stats.lastSuccessAt)
 	))
 	sendLine(player, string.format(
-		"Coordinated created=%d merged=%d committed=%d failed=%d players_saved=%d houses_saved=%d tiles_saved=%d session=%.0f/%s.",
+		"Coordinated created=%d merged=%d committed=%d failed=%d stuck_alerts=%d players_saved=%d houses_saved=%d tiles_saved=%d session=%.0f/%s.",
 		stats.checkpointGroupsCreated, stats.checkpointGroupsMerged,
 		stats.checkpointGroupsSucceeded, stats.checkpointGroupsFailed,
+		stats.checkpointStuckAlerts,
 		stats.checkpointPlayersSaved, stats.checkpointHousesSaved, stats.checkpointTilesSaved,
 		stats.saveSessionId, stats.saveSessionState
 	))

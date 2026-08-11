@@ -27,6 +27,7 @@
 #include "enums.h"
 #include "vocation.h"
 #include "protocolgame.h"
+#include "professions.h"
 #include "ioguild.h"
 #include "party.h"
 #include "inbox.h"
@@ -715,6 +716,18 @@ class Player final : public Creature, public Cylinder
 		void removeManaSpent(uint64_t amount, bool notify = false);
 		void addSkillAdvance(skills_t skill, uint64_t count);
 		void removeSkillTries(skills_t skill, uint64_t count, bool notify = false);
+		uint32_t getAlchemyLevel() const {
+			return alchemyProgress.level;
+		}
+		uint64_t getAlchemyTries() const {
+			return alchemyProgress.tries;
+		}
+		uint8_t getAlchemyPercent() const {
+			return professions::getAlchemyPercent(alchemyProgress);
+		}
+		bool addAlchemyTries(uint64_t count);
+		void resetAlchemy();
+		void sendProfessionData() const;
 
 		int32_t getArmor() const override;
 		int32_t getDefense() const override;
@@ -1283,6 +1296,8 @@ class Player final : public Creature, public Cylinder
 		void setNextRuneActionTask(SchedulerTask* task, bool resetIdleTime = true);
 
 		void death(Creature* lastHitCreature) override;
+		bool willBeRookedOnDeath() const;
+		bool resetToRookgaard();
 		bool dropCorpse(Creature* lastHitCreature, Creature* mostDamageCreature, bool lastHitUnjustified, bool mostDamageUnjustified) override;
 		Item* getCorpse(Creature* lastHitCreature, Creature* mostDamageCreature) override;
 
@@ -1340,12 +1355,14 @@ class Player final : public Creature, public Cylinder
 		bool hasDeferredGuildLoad = false;
 
 		Skill skills[SKILL_LAST + 1];
+		professions::Progress alchemyProgress;
 		LightInfo itemsLight;
 		Position loginPosition;
 		Position lastWalkthroughPosition;
 
 		time_t lastLoginSaved = 0;
 		bool databaseSaveEnabled = true;
+		bool rookgaardResetPending = false;
 		time_t lastLogout = 0;
 		time_t premiumEndsAt = 0;
 

@@ -23,6 +23,7 @@
 
 #include "actions.h"
 #include "bed.h"
+#include "checkpointworker.h"
 #include "configmanager.h"
 #include "creature.h"
 #include "creatureevent.h"
@@ -39,6 +40,7 @@
 #include "mailbox.h"
 #include "monster.h"
 #include "movement.h"
+#include "playeriodatabase.h"
 #include "scheduler.h"
 #include "server.h"
 #include "spells.h"
@@ -68,10 +70,60 @@ extern Weapons* g_weapons;
 extern Scripts* g_scripts;
 
 static constexpr uint32_t RUNE_EXHAUST_TOLERANCE = 70;
+// Upper bound for how long a synchronous checkpoint/save path may block the
+// Dispatcher waiting for in-flight background checkpoint jobs to commit.
+static constexpr uint32_t CHECKPOINT_SYNC_DRAIN_TIMEOUT_MS = 30000;
+// A checkpoint group that keeps failing past this many attempts is considered
+// stuck (e.g. a participant that can never be saved again) and escalates to a
+// loud [ALERT] log; detection/telemetry only, retry behavior is unchanged.
+static constexpr uint32_t CHECKPOINT_STUCK_ALERT_RETRY_THRESHOLD = 3;
 
 namespace {
 	constexpr uint8_t BESTIARY_UNLOCK_EXTENDED_OPCODE = 9;
 	constexpr int32_t PLAYER_CORPSE_CRASH_RECOVERY_DECAY_BONUS_MS = 50 * 60 * 1000;
+
+	const char* checkpointGroupFailureKindLabel(CheckpointGroupFailureKind kind)
+	{
+		switch (kind) {
+			case CheckpointGroupFailureKind::PARTICIPANT_UNAVAILABLE: return "participant unavailable";
+			case CheckpointGroupFailureKind::HOUSE_UNAVAILABLE: return "house unavailable";
+			case CheckpointGroupFailureKind::CAPTURE_FAILED: return "save capture failed";
+			case CheckpointGroupFailureKind::SERIALIZATION: return "tile serialization failed";
+			case CheckpointGroupFailureKind::TRANSACTION: return "transaction failed";
+			case CheckpointGroupFailureKind::WORKER: return "worker execution failed";
+			case CheckpointGroupFailureKind::WORKER_ABORTED: return "worker died before execution";
+			default: return "unknown";
+		}
+	}
+
+	bool isCreatureStack(const Item* item)
+	{
+		if (!item || item->getID() != ITEM_GOLD_COIN) {
+			return false;
+		}
+
+		const ItemAttributes::CustomAttribute* attribute =
+			item->getCustomAttribute(ITEM_CUSTOM_ATTRIBUTE_CREATURE_STACK);
+		if (!attribute) {
+			return false;
+		}
+
+		const bool* value = boost::get<bool>(&attribute->value);
+		return value && *value;
+	}
+
+	void clearCreatureStackAfterMixedMerge(Item* destination, bool sourceCreatureStack,
+			bool destinationCreatureStack, uint32_t mergedCount)
+	{
+		if (!destination || mergedCount == 0 ||
+				sourceCreatureStack == destinationCreatureStack) {
+			return;
+		}
+
+		if (destination->removeCustomAttribute(ITEM_CUSTOM_ATTRIBUTE_CREATURE_STACK)) {
+			destination->markFloorPersistenceAttributeDirty();
+		}
+	}
 
 	struct FloorRecoveryDecayState {
 		std::vector<Item*> heldItems;
@@ -308,7 +360,10 @@ void Game::markFloorTileDirty(const Tile& tile, FloorDirtyReason_t reason, Floor
 
 	auto groupIt = floorCheckpointTileGroups.find(position);
 	if (groupIt != floorCheckpointTileGroups.end()) {
-		touchFloorCheckpointGroup(groupIt->second);
+		auto inFlightGroupIt = floorCheckpointGroups.find(groupIt->second);
+		if (inFlightGroupIt == floorCheckpointGroups.end() || !inFlightGroupIt->second.workerInFlight) {
+			touchFloorCheckpointGroup(groupIt->second);
+		}
 	}
 
 	recordDispatcherFloorDirtyEvent(floorDirtyTiles.size());
@@ -339,7 +394,8 @@ uint64_t Game::mergeFloorCheckpointGroups(const std::set<uint64_t>& groupIds)
 {
 	uint64_t targetId = 0;
 	for (uint64_t groupId : groupIds) {
-		if (floorCheckpointGroups.find(groupId) != floorCheckpointGroups.end()) {
+		auto it = floorCheckpointGroups.find(groupId);
+		if (it != floorCheckpointGroups.end() && !it->second.workerInFlight) {
 			targetId = groupId;
 			break;
 		}
@@ -364,6 +420,10 @@ uint64_t Game::mergeFloorCheckpointGroups(const std::set<uint64_t>& groupIds)
 
 		auto sourceIt = floorCheckpointGroups.find(groupId);
 		if (sourceIt == floorCheckpointGroups.end()) {
+			continue;
+		}
+		if (sourceIt->second.workerInFlight) {
+			// An in-flight background job owns this group; it must not be merged.
 			continue;
 		}
 
@@ -1360,12 +1420,24 @@ uint32_t Game::processFloorSnapshots(bool force)
 
 	DispatcherPhaseMetricsTimer snapshotTickTimer(DispatcherMetricsPhase::FLOOR_SNAPSHOT_TICK);
 
+	// Reclaim any work left behind by a dead worker, then apply the results of
+	// background checkpoint jobs that finished since the last pass.
+	recoverDeadCheckpointWorker();
+	processCheckpointResults();
+
 	const int64_t now = OTSYS_TIME();
 	uint32_t queued = 0;
+	size_t stuckGroups = 0;
 	std::vector<uint64_t> readyGroups;
 	readyGroups.reserve(floorCheckpointGroups.size());
 	for (const auto& entry : floorCheckpointGroups) {
 		const FloorCheckpointGroup& group = entry.second;
+		if (group.retryCount >= CHECKPOINT_STUCK_ALERT_RETRY_THRESHOLD) {
+			++stuckGroups;
+		}
+		if (group.workerInFlight) {
+			continue;
+		}
 		if (now < group.retryNotBefore) {
 			continue;
 		}
@@ -1388,6 +1460,7 @@ uint32_t Game::processFloorSnapshots(bool force)
 			readyGroups.push_back(entry.first);
 		}
 	}
+	recordDispatcherCheckpointStuckGroups(stuckGroups);
 
 	for (uint64_t groupId : readyGroups) {
 		auto groupIt = floorCheckpointGroups.find(groupId);
@@ -1398,7 +1471,15 @@ uint32_t Game::processFloorSnapshots(bool force)
 		if (queued != 0 && queued + groupTiles > floorSnapshotBatchSize) {
 			break;
 		}
-		if (executeFloorCheckpointGroup(groupId)) {
+
+		bool handled;
+		if (g_checkpointWorker.isHealthy()) {
+			handled = enqueueFloorCheckpointGroup(groupId);
+		} else {
+			handled = executeFloorCheckpointGroup(groupId);
+		}
+
+		if (handled) {
 			queued += groupTiles;
 		} else {
 			break;
@@ -1429,6 +1510,15 @@ uint32_t Game::processFloorSnapshots(bool force)
 
 		if (queueFloorSnapshot(entry.first, record)) {
 			++queued;
+		}
+	}
+
+	if (force && g_checkpointWorker.isHealthy()) {
+		// Forced flushes (server save / manual flush) must leave every captured
+		// checkpoint committed before returning.
+		if (!drainCheckpointWorker(CHECKPOINT_SYNC_DRAIN_TIMEOUT_MS)) {
+			std::cout << "[Warning - Game::processFloorSnapshots] forced flush could not "
+			          << "commit every background checkpoint within the limit." << std::endl;
 		}
 	}
 	return queued;
@@ -1785,6 +1875,11 @@ void Game::completePreparedFloorSnapshots(const std::vector<PreparedFloorSnapsho
 
 bool Game::executeFloorCheckpointGroup(uint64_t groupId, Player* requiredPlayer)
 {
+	// Synchronous checkpoints must never race an in-flight background job.
+	if (!drainCheckpointWorker(CHECKPOINT_SYNC_DRAIN_TIMEOUT_MS)) {
+		return false;
+	}
+
 	auto groupIt = floorCheckpointGroups.find(groupId);
 	if (groupIt == floorCheckpointGroups.end()) {
 		return true;
@@ -1800,12 +1895,8 @@ bool Game::executeFloorCheckpointGroup(uint64_t groupId, Player* requiredPlayer)
 		Player* checkpointPlayer = requiredPlayer && requiredPlayer->getGUID() == playerGuid ?
 			requiredPlayer : getPlayerByGUID(playerGuid);
 		if (!checkpointPlayer) {
-			group.lastError = "a checkpoint participant is no longer available in memory";
-			++group.retryCount;
-			group.retryNotBefore = OTSYS_TIME() + static_cast<int64_t>(floorSnapshotRetryMs) *
-				std::min<uint32_t>(group.retryCount, 6);
-			++floorSnapshotStats.checkpointGroupsFailed;
-			floorSnapshotStats.lastError = group.lastError;
+			failFloorCheckpointGroup(&group, "a checkpoint participant is no longer available in memory",
+				CheckpointGroupFailureKind::PARTICIPANT_UNAVAILABLE);
 			return false;
 		}
 		checkpointPlayers.push_back(checkpointPlayer);
@@ -1815,12 +1906,8 @@ bool Game::executeFloorCheckpointGroup(uint64_t groupId, Player* requiredPlayer)
 	for (uint32_t houseId : group.houseIds) {
 		House* checkpointHouse = map.houses.getHouse(houseId);
 		if (!checkpointHouse) {
-			group.lastError = "a checkpoint house is no longer available in memory";
-			++group.retryCount;
-			group.retryNotBefore = OTSYS_TIME() + static_cast<int64_t>(floorSnapshotRetryMs) *
-				std::min<uint32_t>(group.retryCount, 6);
-			++floorSnapshotStats.checkpointGroupsFailed;
-			floorSnapshotStats.lastError = group.lastError;
+			failFloorCheckpointGroup(&group, "a checkpoint house is no longer available in memory",
+				CheckpointGroupFailureKind::HOUSE_UNAVAILABLE);
 			return false;
 		}
 		checkpointHouses.push_back(checkpointHouse);
@@ -1836,13 +1923,7 @@ bool Game::executeFloorCheckpointGroup(uint64_t groupId, Player* requiredPlayer)
 		}
 		PreparedFloorSnapshot prepared;
 		if (!prepareFloorSnapshot(position, dirtyIt->second, false, group.id, group.version, prepared, error)) {
-			group.lastError = error;
-			++group.retryCount;
-			group.retryNotBefore = OTSYS_TIME() + static_cast<int64_t>(floorSnapshotRetryMs) *
-				std::min<uint32_t>(group.retryCount, 6);
-			++floorSnapshotStats.serializationFailed;
-			++floorSnapshotStats.checkpointGroupsFailed;
-			floorSnapshotStats.lastError = error;
+			failFloorCheckpointGroup(&group, error, CheckpointGroupFailureKind::SERIALIZATION);
 			return false;
 		}
 		snapshots.push_back(std::move(prepared));
@@ -1850,13 +1931,7 @@ bool Game::executeFloorCheckpointGroup(uint64_t groupId, Player* requiredPlayer)
 
 	if (!executeFloorSnapshotsTransaction(
 	        snapshots, checkpointPlayers, checkpointHouses, group.id, group.version, error)) {
-		group.lastError = error;
-		++group.retryCount;
-		group.retryNotBefore = OTSYS_TIME() + static_cast<int64_t>(floorSnapshotRetryMs) *
-			std::min<uint32_t>(group.retryCount, 6);
-		++floorSnapshotStats.failed;
-		++floorSnapshotStats.checkpointGroupsFailed;
-		floorSnapshotStats.lastError = error;
+		failFloorCheckpointGroup(&group, error, CheckpointGroupFailureKind::TRANSACTION);
 		return false;
 	}
 
@@ -1868,6 +1943,119 @@ bool Game::executeFloorCheckpointGroup(uint64_t groupId, Player* requiredPlayer)
 	++floorSnapshotStats.checkpointGroupsSucceeded;
 	recordDispatcherCheckpointGroupSaved(snapshots.size(), checkpointPlayers.size());
 	removeFloorCheckpointGroup(groupId);
+	return true;
+}
+
+bool Game::enqueueFloorCheckpointGroup(uint64_t groupId)
+{
+	auto groupIt = floorCheckpointGroups.find(groupId);
+	if (groupIt == floorCheckpointGroups.end()) {
+		return true;
+	}
+	FloorCheckpointGroup& group = groupIt->second;
+	if (group.workerInFlight) {
+		return true;
+	}
+
+	DispatcherPhaseMetricsTimer captureTimer(DispatcherMetricsPhase::FLOOR_CHECKPOINT_CAPTURE);
+
+	auto job = std::make_unique<CheckpointJob>();
+	job->groupId = group.id;
+	job->groupVersion = group.version;
+
+	// Capture every player save as immutable SQL statements. Reading live Player
+	// state happens here, on the Dispatcher; only strings cross to the worker.
+	for (uint32_t playerGuid : group.playerGuids) {
+		Player* checkpointPlayer = getPlayerByGUID(playerGuid);
+		if (!checkpointPlayer) {
+			failFloorCheckpointGroup(&group, "a checkpoint participant is no longer available in memory",
+				CheckpointGroupFailureKind::PARTICIPANT_UNAVAILABLE);
+			return false;
+		}
+
+		std::vector<std::string> statements;
+		bool captured;
+		{
+			DispatcherCheckpointSaveMetricsContext checkpointSaveContext;
+			PlayerIORemoteDatabaseScope collector(statements);
+			DBTransaction transaction;
+			captured = transaction.begin() && IOLoginData::savePlayerData(checkpointPlayer) &&
+			           transaction.commit();
+		}
+		if (!captured || statements.empty()) {
+			failFloorCheckpointGroup(&group, "could not capture a player save for the coordinated checkpoint",
+				CheckpointGroupFailureKind::CAPTURE_FAILED);
+			return false;
+		}
+		job->playerStatements.insert(job->playerStatements.end(),
+			std::make_move_iterator(statements.begin()), std::make_move_iterator(statements.end()));
+		job->playerGuids.insert(playerGuid);
+	}
+
+	// Capture every house save as immutable SQL statements.
+	for (uint32_t houseId : group.houseIds) {
+		House* checkpointHouse = map.houses.getHouse(houseId);
+		if (!checkpointHouse) {
+			failFloorCheckpointGroup(&group, "a checkpoint house is no longer available in memory",
+				CheckpointGroupFailureKind::HOUSE_UNAVAILABLE);
+			return false;
+		}
+
+		std::vector<std::string> statements;
+		bool captured;
+		{
+			PlayerIORemoteDatabaseScope collector(statements);
+			DBTransaction transaction;
+			captured = transaction.begin() && IOMapSerialize::saveHouseData(checkpointHouse) &&
+			           transaction.commit();
+		}
+		if (!captured) {
+			failFloorCheckpointGroup(&group, "could not capture a house save for the coordinated checkpoint",
+				CheckpointGroupFailureKind::CAPTURE_FAILED);
+			return false;
+		}
+		job->houseStatements.insert(job->houseStatements.end(),
+			std::make_move_iterator(statements.begin()), std::make_move_iterator(statements.end()));
+		job->houseIds.insert(houseId);
+	}
+
+	// Capture every dirty tile snapshot as an immutable UPSERT statement.
+	std::string prepareError;
+	for (const Position& position : group.positions) {
+		auto dirtyIt = floorDirtyTiles.find(position);
+		if (dirtyIt == floorDirtyTiles.end()) {
+			continue;
+		}
+		PreparedFloorSnapshot prepared;
+		if (!prepareFloorSnapshot(position, dirtyIt->second, false, group.id, group.version, prepared,
+		                          prepareError)) {
+			failFloorCheckpointGroup(&group, prepareError, CheckpointGroupFailureKind::SERIALIZATION);
+			return false;
+		}
+		job->floorStatements.push_back(prepared.query);
+		job->snapshots.push_back(std::move(prepared));
+	}
+
+	job->markerStatement = fmt::format(
+		"INSERT INTO `floor_persistence_checkpoints` (`world_id`,`generation_id`,`save_session_id`,"
+		"`checkpoint_group_id`,`checkpoint_group_version`,`tile_count`,`player_count`,`house_count`,`state`) VALUES "
+		"({:d},{:d},{:d},{:d},{:d},{:d},{:d},{:d},'COMMITTED')",
+		floorSnapshotWorldId, floorSnapshotGenerationId, floorPersistenceSessionId, group.id, group.version,
+		job->snapshots.size(), job->playerGuids.size(), job->houseIds.size());
+
+	const size_t pendingDepth = g_checkpointWorker.pendingCount() + 1;
+	if (!g_checkpointWorker.enqueue(std::move(job))) {
+		recordDispatcherCheckpointBackpressureSkip();
+		// The worker is saturated; leave the group dirty and retry later.
+		group.retryNotBefore = OTSYS_TIME() + static_cast<int64_t>(floorSnapshotRetryMs);
+		return false;
+	}
+
+	group.workerInFlight = true;
+	for (uint32_t playerGuid : group.playerGuids) {
+		++floorCheckpointInFlightPlayers[playerGuid];
+	}
+	recordDispatcherCheckpointJobQueued(pendingDepth);
 	return true;
 }
 
@@ -1886,6 +2074,11 @@ bool Game::saveFloorCheckpointForPlayer(Player* player)
 
 bool Game::flushFloorCheckpointGroups()
 {
+	// Commit every pending background checkpoint before flushing the remainder
+	// synchronously so no in-flight job races the flush.
+	if (!drainCheckpointWorker(CHECKPOINT_SYNC_DRAIN_TIMEOUT_MS)) {
+		return false;
+	}
 	while (!floorCheckpointGroups.empty()) {
 		const uint64_t groupId = floorCheckpointGroups.begin()->first;
 		if (!executeFloorCheckpointGroup(groupId)) {
@@ -1893,6 +2086,204 @@ bool Game::flushFloorCheckpointGroups()
 		}
 	}
 	return true;
+}
+
+bool Game::hasInFlightCheckpointForPlayer(uint32_t playerGuid) const
+{
+	return floorCheckpointInFlightPlayers.find(playerGuid) != floorCheckpointInFlightPlayers.end();
+}
+
+void Game::releaseInFlightCheckpointPlayers(const std::set<uint32_t>& playerGuids)
+{
+	for (uint32_t playerGuid : playerGuids) {
+		auto it = floorCheckpointInFlightPlayers.find(playerGuid);
+		if (it == floorCheckpointInFlightPlayers.end()) {
+			continue;
+		}
+		if (it->second <= 1) {
+			floorCheckpointInFlightPlayers.erase(it);
+		} else {
+			--it->second;
+		}
+	}
+}
+
+bool Game::drainCheckpointWorker(uint32_t timeoutMs)
+{
+	// Recover first in case the worker thread died and left work behind.
+	recoverDeadCheckpointWorker();
+
+	if (!g_checkpointWorker.isHealthy()) {
+		// Unhealthy (stopped or dead). After recovery no pending work can ever
+		// commit, so there is nothing left to drain.
+		processCheckpointResults();
+		return true;
+	}
+	if (g_checkpointWorker.pendingCount() == 0) {
+		processCheckpointResults();
+		return true;
+	}
+
+	recordDispatcherCheckpointDrain();
+	DispatcherPhaseMetricsTimer drainTimer(DispatcherMetricsPhase::FLOOR_CHECKPOINT_DRAIN_WAIT);
+	const int64_t deadline = OTSYS_TIME() + timeoutMs;
+	while (true) {
+		processCheckpointResults();
+		// If the worker died while draining, reclaim its work and stop waiting.
+		recoverDeadCheckpointWorker();
+		if (!g_checkpointWorker.isHealthy()) {
+			processCheckpointResults();
+			return true;
+		}
+		if (g_checkpointWorker.pendingCount() == 0) {
+			processCheckpointResults();
+			return true;
+		}
+		if (OTSYS_TIME() >= deadline) {
+			std::cout << "[Warning - Game::drainCheckpointWorker] timed out waiting for "
+			          << g_checkpointWorker.pendingCount() << " checkpoint job(s)." << std::endl;
+			return false;
+		}
+		g_checkpointWorker.waitProgress(50);
+	}
+}
+
+void Game::recoverDeadCheckpointWorker()
+{
+	// Reclaim only once the thread is confirmed dead. While it is alive (even
+	// if slow) its queued/in-flight jobs may still commit, so they must not be
+	// reclaimed.
+	if (g_checkpointWorker.isThreadAlive()) {
+		return;
+	}
+
+	AbortedCheckpointWork aborted = g_checkpointWorker.abortAllPending();
+	if (aborted.queuedJobs.empty() && aborted.inFlightPlayerGuids.empty()) {
+		return;
+	}
+
+	std::cout << "[Warning - Game::recoverDeadCheckpointWorker] checkpoint worker thread "
+	          << "died; recovering " << aborted.queuedJobs.size() << " queued checkpoint job(s); "
+	          << "checkpoints fall back to the synchronous path." << std::endl;
+
+	for (std::unique_ptr<CheckpointJob>& job : aborted.queuedJobs) {
+		auto groupIt = floorCheckpointGroups.find(job->groupId);
+		if (groupIt != floorCheckpointGroups.end()) {
+			groupIt->second.workerInFlight = false;
+		}
+		failFloorCheckpointGroup(groupIt != floorCheckpointGroups.end() ? &groupIt->second : nullptr,
+			"checkpoint worker thread died before the job executed",
+			CheckpointGroupFailureKind::WORKER_ABORTED);
+		releaseInFlightCheckpointPlayers(job->playerGuids);
+	}
+
+	// Release the reservation of the job that was executing when the thread died.
+	releaseInFlightCheckpointPlayers(aborted.inFlightPlayerGuids);
+}
+
+void Game::processCheckpointResults()
+{
+	std::vector<CheckpointResult> results;
+	if (g_checkpointWorker.popResults(results) == 0) {
+		return;
+	}
+
+	for (CheckpointResult& result : results) {
+		const CheckpointJob& job = *result.job;
+		recordDispatcherCheckpointJobCompleted(result.success);
+		recordDispatcherPhase(DispatcherMetricsPhase::FLOOR_CHECKPOINT_WORKER_TOTAL, result.totalNanoseconds);
+		recordDispatcherPhase(DispatcherMetricsPhase::FLOOR_CHECKPOINT_WORKER_BEGIN, result.beginNanoseconds);
+		recordDispatcherPhase(DispatcherMetricsPhase::FLOOR_CHECKPOINT_WORKER_SQL, result.sqlNanoseconds);
+		recordDispatcherPhase(DispatcherMetricsPhase::FLOOR_CHECKPOINT_WORKER_COMMIT, result.commitNanoseconds);
+
+		if (result.success) {
+			floorSnapshotStats.queued += job.snapshots.size();
+			completePreparedFloorSnapshots(job.snapshots);
+			floorSnapshotStats.checkpointTilesSaved += job.snapshots.size();
+			floorSnapshotStats.checkpointPlayersSaved += job.playerGuids.size();
+			floorSnapshotStats.checkpointHousesSaved += job.houseIds.size();
+			++floorSnapshotStats.checkpointGroupsSucceeded;
+			recordDispatcherCheckpointGroupSaved(job.snapshots.size(), job.playerGuids.size());
+			removeFloorCheckpointGroup(job.groupId);
+		} else {
+			auto groupIt = floorCheckpointGroups.find(job.groupId);
+			failFloorCheckpointGroup(groupIt != floorCheckpointGroups.end() ? &groupIt->second : nullptr,
+				result.error, CheckpointGroupFailureKind::WORKER);
+		}
+
+		auto releaseIt = floorCheckpointGroups.find(job.groupId);
+		if (releaseIt != floorCheckpointGroups.end()) {
+			releaseIt->second.workerInFlight = false;
+		}
+		releaseInFlightCheckpointPlayers(job.playerGuids);
+	}
+}
+
+void Game::failFloorCheckpointGroup(FloorCheckpointGroup* group, const std::string& error,
+                                    CheckpointGroupFailureKind kind)
+{
+	if (group) {
+		group->lastError = error;
+		++group->retryCount;
+		group->retryNotBefore = OTSYS_TIME() + static_cast<int64_t>(floorSnapshotRetryMs) *
+			std::min<uint32_t>(group->retryCount, 6);
+	}
+
+	if (kind == CheckpointGroupFailureKind::SERIALIZATION) {
+		++floorSnapshotStats.serializationFailed;
+	} else if (kind == CheckpointGroupFailureKind::TRANSACTION ||
+	           kind == CheckpointGroupFailureKind::WORKER) {
+		++floorSnapshotStats.failed;
+	}
+	++floorSnapshotStats.checkpointGroupsFailed;
+	floorSnapshotStats.lastError = error;
+	recordDispatcherCheckpointGroupFailure(kind);
+
+	if (!group) {
+		std::cout << "[Warning - Game::failFloorCheckpointGroup] checkpoint failed ("
+		          << checkpointGroupFailureKindLabel(kind)
+		          << ") for a group that no longer exists: " << error << std::endl;
+		return;
+	}
+
+	// Escalate to a loud alert once the group is stuck, then re-alert every
+	// fourth attempt so a permanently failing group keeps showing up.
+	const bool stuckEscalation = group->retryCount >= CHECKPOINT_STUCK_ALERT_RETRY_THRESHOLD &&
+		(group->retryCount - CHECKPOINT_STUCK_ALERT_RETRY_THRESHOLD) % 4 == 0;
+	if (stuckEscalation) {
+		++floorSnapshotStats.checkpointStuckAlerts;
+
+		std::string participants = "none";
+		if (!group->playerGuids.empty()) {
+			participants.clear();
+			for (const uint32_t playerGuid : group->playerGuids) {
+				if (!participants.empty()) {
+					participants += ", ";
+				}
+				const Player* participant = getPlayerByGUID(playerGuid);
+				if (participant) {
+					participants += participant->getName();
+					participants += " (" + std::to_string(playerGuid) + ")";
+				} else {
+					participants += std::to_string(playerGuid);
+				}
+			}
+		}
+
+		std::cout << "[ALERT - Game::failFloorCheckpointGroup] checkpoint group " << group->id
+		          << " is STUCK: " << group->retryCount << " consecutive failure(s) ("
+		          << checkpointGroupFailureKindLabel(kind) << "), pending for "
+		          << ((OTSYS_TIME() - group->firstModifiedMonotonic) / 1000)
+		          << "s; participants=[" << participants << "] tiles=" << group->positions.size()
+		          << " houses=" << group->houseIds.size()
+		          << "; merged saves are held until this group commits. Last error: " << error
+		          << std::endl;
+		return;
+	}
+
+	std::cout << "[Warning - Game::failFloorCheckpointGroup] checkpoint group " << group->id
+	          << " failed (attempt " << group->retryCount << ", "
+	          << checkpointGroupFailureKindLabel(kind) << "): " << error << std::endl;
 }
 
 bool Game::buildFloorRecoveryPlan()
@@ -3596,6 +3987,14 @@ uint32_t Game::flushFloorSnapshots()
 	return processFloorSnapshots(true);
 }
 
+void Game::simulateFloorSnapshotFailures(uint32_t count)
+{
+	floorSnapshotSimulatedFailures = count;
+	// Mirror the hook into the checkpoint worker so forced failures also apply
+	// to checkpoints executed in the background.
+	g_checkpointWorker.simulateFailures(count);
+}
+
 FloorSnapshotDatabaseStats Game::getFloorSnapshotDatabaseStats() const
 {
 	FloorSnapshotDatabaseStats stats;
@@ -5155,6 +5554,8 @@ ReturnValue Game::internalMoveItem(Cylinder* fromCylinder, Cylinder* toCylinder,
 	//remove the item
 	int32_t itemIndex = fromCylinder->getThingIndex(item);
 	Item* updateItem = nullptr;
+	const bool sourceCreatureStack = isCreatureStack(item);
+	const bool destinationCreatureStack = isCreatureStack(toItem);
 	fromCylinder->removeThing(item, m);
 
 	//update item(s)
@@ -5163,6 +5564,8 @@ ReturnValue Game::internalMoveItem(Cylinder* fromCylinder, Cylinder* toCylinder,
 
 		if (item->equals(toItem)) {
 			n = std::min<uint32_t>(100 - toItem->getItemCount(), m);
+			clearCreatureStackAfterMixedMerge(
+				toItem, sourceCreatureStack, destinationCreatureStack, n);
 			toCylinder->updateThing(toItem, toItem->getID(), toItem->getItemCount() + n);
 			updateItem = toItem;
 		} else {
@@ -5384,7 +5787,11 @@ ReturnValue Game::internalAddItem(Cylinder* toCylinder, Item* item, int32_t inde
 	if (item->isStackable() && item->equals(toItem)) {
 		uint32_t m = std::min<uint32_t>(item->getItemCount(), maxQueryCount);
 		uint32_t n = std::min<uint32_t>(100 - toItem->getItemCount(), m);
+		const bool sourceCreatureStack = isCreatureStack(item);
+		const bool destinationCreatureStack = isCreatureStack(toItem);
 
+		clearCreatureStackAfterMixedMerge(
+			toItem, sourceCreatureStack, destinationCreatureStack, n);
 		toCylinder->updateThing(toItem, toItem->getID(), toItem->getItemCount() + n);
 		if (attributionGuid != 0) {
 			attributeSuccessfulItemEndpoint(toCylinder, toItem, attributionGuid);
@@ -9160,6 +9567,14 @@ void Game::shutdown()
 	std::cout << "Shutting down..." << std::flush;
 
 	g_playerIOManager.shutdown(true);
+	// Commit every captured background checkpoint before tearing the database
+	// down, then stop accepting new work.
+	if (!drainCheckpointWorker(CHECKPOINT_SYNC_DRAIN_TIMEOUT_MS)) {
+		std::cout << "[Warning - Game::shutdown] some background checkpoints did not "
+		          << "commit before shutdown; crash recovery will restore the last "
+		          << "committed state." << std::endl;
+	}
+	g_checkpointWorker.shutdown();
 	g_scheduler.shutdown();
 	g_databaseTasks.shutdown();
 	g_dispatcher.shutdown();

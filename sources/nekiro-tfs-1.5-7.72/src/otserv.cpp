@@ -36,6 +36,7 @@
 #include "playeriomanager.h"
 #include "scheduler.h"
 #include "databasetasks.h"
+#include "checkpointworker.h"
 #include "script.h"
 #include <fstream>
 #include <fmt/format.h>
@@ -103,11 +104,13 @@ int main(int argc, char* argv[])
 		g_playerIOManager.shutdown();
 		g_scheduler.shutdown();
 		g_databaseTasks.shutdown();
+		g_checkpointWorker.shutdown();
 		g_dispatcher.shutdown();
 	}
 
 	g_scheduler.join();
 	g_databaseTasks.join();
+	g_checkpointWorker.join();
 	g_dispatcher.join();
 	return 0;
 }
@@ -225,6 +228,11 @@ void mainLoader(int, char*[], ServiceManager* services)
 		return;
 	}
 	g_databaseTasks.start();
+
+	if (!g_checkpointWorker.start()) {
+		std::cout << "[Warning] Checkpoint worker unavailable; coordinated floor checkpoints "
+		             "will run synchronously on the Dispatcher." << std::endl;
+	}
 
 	DatabaseManager::updateDatabase();
 	if (!g_playerIOManager.start()) {

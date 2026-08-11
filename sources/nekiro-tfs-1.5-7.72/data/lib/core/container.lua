@@ -19,7 +19,7 @@ local function getLootDifficulty(chance)
 	return 5 -- Extremely Rare
 end
 
-function Container.createLootItem(self, item)
+function Container.createLootItem(self, item, creatureLoot)
 	if self:getEmptySlots() == 0 then
 		return true
 	end
@@ -50,10 +50,13 @@ function Container.createLootItem(self, item)
 		end
 
 		tmpItem:setCustomAttribute(LOOT_DIFFICULTY_ATTRIBUTE, getLootDifficulty(item.chance))
+		if creatureLoot and item.itemId == ITEM_GOLD_COIN then
+			tmpItem:setCustomAttribute("creaturestack", true)
+		end
 
 		if tmpItem:isContainer() then
 			for i = 1, #item.childLoot do
-				if not tmpItem:createLootItem(item.childLoot[i]) then
+				if not tmpItem:createLootItem(item.childLoot[i], creatureLoot) then
 					tmpItem:remove()
 					return false
 				end

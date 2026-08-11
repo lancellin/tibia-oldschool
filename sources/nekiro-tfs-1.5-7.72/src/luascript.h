@@ -920,11 +920,16 @@ class LuaScriptInterface
 		static int luaPlayerGetSkullTime(lua_State* L);
 		static int luaPlayerSetSkullTime(lua_State* L);
 		static int luaPlayerGetDeathPenalty(lua_State* L);
+		static int luaPlayerWillBeRookedOnDeath(lua_State* L);
 
 		static int luaPlayerGetExperience(lua_State* L);
 		static int luaPlayerAddExperience(lua_State* L);
 		static int luaPlayerRemoveExperience(lua_State* L);
 		static int luaPlayerGetLevel(lua_State* L);
+		static int luaPlayerGetAlchemyLevel(lua_State* L);
+		static int luaPlayerGetAlchemyTries(lua_State* L);
+		static int luaPlayerGetAlchemyPercent(lua_State* L);
+		static int luaPlayerAddAlchemyTries(lua_State* L);
 
 		static int luaPlayerGetMagicLevel(lua_State* L);
 		static int luaPlayerGetBaseMagicLevel(lua_State* L);

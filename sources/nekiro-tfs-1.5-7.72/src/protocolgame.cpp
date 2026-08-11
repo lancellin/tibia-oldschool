@@ -49,6 +49,7 @@ extern Chat* g_chat;
 namespace {
 
 constexpr uint8_t CONTAINER_RESTORE_EXTENDED_OPCODE = 8;
+constexpr uint8_t PROFESSIONS_EXTENDED_OPCODE = 11;
 constexpr uint8_t CAM_FORENSIC_EXTENDED_OPCODE = 203;
 constexpr uint8_t CAM_TRANSCRIPT_EXTENDED_OPCODE = 204;
 constexpr size_t CAM_FORENSIC_MAX_ENTRIES_PER_BATCH = 32;
@@ -690,6 +691,7 @@ bool ProtocolGame::finishNewPlayerLogin(uint32_t accountId, OperatingSystem_t op
 	player->lastLoginSaved = std::max<time_t>(time(nullptr), player->lastLoginSaved + 1);
 	acceptPackets = true;
 	sendBestiaryCharmsData();
+	sendProfessionData();
 	postPlaceTimer.stop();
 
 	OutputMessagePool::getInstance().addProtocolToAutosend(shared_from_this());
@@ -733,6 +735,7 @@ void ProtocolGame::connect(uint32_t playerId, OperatingSystem_t operatingSystem)
 	player->resetIdleTime();
 	acceptPackets = true;
 	sendBestiaryCharmsData();
+	sendProfessionData();
 }
 
 void ProtocolGame::logout(bool displayEffect, bool forced)
@@ -946,6 +949,17 @@ void ProtocolGame::sendExtendedOpcode(uint8_t opcode, const std::string& buffer)
 	msg.addByte(opcode);
 	msg.addString(buffer);
 	writeToOutputBuffer(msg);
+}
+
+void ProtocolGame::sendProfessionData()
+{
+	if (!player || player->getOperatingSystem() < CLIENTOS_OTCLIENT_LINUX) {
+		return;
+	}
+
+	sendExtendedOpcode(PROFESSIONS_EXTENDED_OPCODE,
+		fmt::format("1|alchemy|{:d}|{:d}", player->getAlchemyLevel(),
+			static_cast<uint32_t>(player->getAlchemyPercent())));
 }
 
 void ProtocolGame::initializeCamTranscriptContext(OperatingSystem_t operatingSystem)
