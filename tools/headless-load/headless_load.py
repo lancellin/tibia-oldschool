@@ -848,10 +848,7 @@ class LoadRunner:
 
     def write_summary(self) -> None:
         summary = {
-            "configuration": {
-                key: ("<redacted>" if key == "password" else value)
-                for key, value in vars(self.args).items()
-            },
+            "configuration": vars(self.args),
             "elapsed_s": time.perf_counter() - self.started_at,
             "attempted": self.counters.attempted,
             "logged_in": self.counters.logged_in,

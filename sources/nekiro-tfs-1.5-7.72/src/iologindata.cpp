@@ -94,6 +94,70 @@ std::string decodeSecret(const std::string& secret)
 	return key;
 }
 
+bool IOLoginData::loginserverAuthentication(const std::string& name, const std::string& password, Account& account)
+{
+	Database& db = Database::getInstance();
+
+	DBResult_ptr result = db.storeQuery(fmt::format("SELECT `id`, `name`, `password`, `secret`, `type`, `premium_ends_at` FROM `accounts` WHERE `name` = {:s}", db.escapeString(name)));
+	if (!result) {
+		return false;
+	}
+
+	if (transformToSHA1(password) != result->getString("password")) {
+		return false;
+	}
+
+	account.id = result->getNumber<uint32_t>("id");
+	account.name = result->getString("name");
+	account.key = decodeSecret(result->getString("secret"));
+	account.accountType = static_cast<AccountType_t>(result->getNumber<int32_t>("type"));
+	account.premiumEndsAt = result->getNumber<time_t>("premium_ends_at");
+
+	result = db.storeQuery(fmt::format("SELECT `name` FROM `players` WHERE `account_id` = {:d} AND `deletion` = 0 ORDER BY `name` ASC", account.id));
+	if (result) {
+		do {
+			account.characters.push_back(result->getString("name"));
+		} while (result->next());
+	}
+	return true;
+}
+
+uint32_t IOLoginData::gameworldAuthentication(const std::string& accountName, const std::string& password, std::string& characterName, std::string&, uint32_t)
+{
+	Database& db = Database::getInstance();
+
+	DBResult_ptr result = db.storeQuery(fmt::format("SELECT `id`, `password`, `secret` FROM `accounts` WHERE `name` = {:s}", db.escapeString(accountName)));
+	if (!result) {
+		return 0;
+	}
+
+	/*std::string secret = decodeSecret(result->getString("secret"));
+	if (!secret.empty()) {
+		if (token.empty()) {
+			return 0;
+		}
+
+		bool tokenValid = token == generateToken(secret, tokenTime) || token == generateToken(secret, tokenTime - 1) || token == generateToken(secret, tokenTime + 1);
+		if (!tokenValid) {
+			return 0;
+		}
+	}*/
+
+	if (transformToSHA1(password) != result->getString("password")) {
+		return 0;
+	}
+
+	uint32_t accountId = result->getNumber<uint32_t>("id");
+
+	result = db.storeQuery(fmt::format("SELECT `name` FROM `players` WHERE `name` = {:s} AND `account_id` = {:d} AND `deletion` = 0", db.escapeString(characterName), accountId));
+	if (!result) {
+		return 0;
+	}
+
+	characterName = result->getString("name");
+	return accountId;
+}
+
 uint32_t IOLoginData::getAccountIdByPlayerName(const std::string& playerName)
 {
 	Database& db = Database::getInstance();

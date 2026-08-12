@@ -21,7 +21,6 @@
 #define FS_PROTOCOLGAME_H_FACA2A2D1A9348B78E8FD7E8003EBB87
 
 #include "protocol.h"
-#include "authenticationservice.h"
 #include "chat.h"
 #include "creature.h"
 #include "tasks.h"
@@ -80,7 +79,7 @@ class ProtocolGame final : public Protocol
 
 		explicit ProtocolGame(Connection_ptr connection) : Protocol(connection) {}
 
-		void login(AuthenticatedPrincipal principal, OperatingSystem_t operatingSystem);
+		void login(const std::string& name, uint32_t accountId, OperatingSystem_t operatingSystem);
 		void logout(bool displayEffect, bool forced);
 		void sendExtendedOpcode(uint8_t opcode, const std::string& buffer);
 		void sendProfessionData();
@@ -94,9 +93,8 @@ class ProtocolGame final : public Protocol
 			return std::static_pointer_cast<ProtocolGame>(shared_from_this());
 		}
 		void connect(uint32_t playerId, OperatingSystem_t operatingSystem);
-		bool finishNewPlayerLogin(OperatingSystem_t operatingSystem,
-			const std::shared_ptr<DispatcherLoginMetricsTimer>& loginMetrics,
-			bool characterNamelocked, AuthenticationBanInfo accountBan);
+		bool finishNewPlayerLogin(uint32_t accountId, OperatingSystem_t operatingSystem,
+			const std::shared_ptr<DispatcherLoginMetricsTimer>& loginMetrics);
 		void disconnectClient(const std::string& message) const;
 		void writeToOutputBuffer(const NetworkMessage& msg);
 		OutputMessage_ptr appendToOutputBuffer(const NetworkMessage& msg);

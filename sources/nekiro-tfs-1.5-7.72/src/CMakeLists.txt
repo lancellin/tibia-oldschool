@@ -1,8 +1,6 @@
 set(tfs_SRC
 	${CMAKE_CURRENT_LIST_DIR}/otpch.cpp
 	${CMAKE_CURRENT_LIST_DIR}/actions.cpp
-	${CMAKE_CURRENT_LIST_DIR}/authenticationmanager.cpp
-	${CMAKE_CURRENT_LIST_DIR}/authenticationservice.cpp
 	${CMAKE_CURRENT_LIST_DIR}/ban.cpp
 	${CMAKE_CURRENT_LIST_DIR}/baseevents.cpp
 	${CMAKE_CURRENT_LIST_DIR}/bed.cpp
@@ -53,7 +51,6 @@ set(tfs_SRC
 	${CMAKE_CURRENT_LIST_DIR}/outfit.cpp
 	${CMAKE_CURRENT_LIST_DIR}/outputmessage.cpp
 	${CMAKE_CURRENT_LIST_DIR}/party.cpp
-	${CMAKE_CURRENT_LIST_DIR}/passwordhash.cpp
 	${CMAKE_CURRENT_LIST_DIR}/player.cpp
 	${CMAKE_CURRENT_LIST_DIR}/professions.cpp
 	${CMAKE_CURRENT_LIST_DIR}/playerioclient.cpp

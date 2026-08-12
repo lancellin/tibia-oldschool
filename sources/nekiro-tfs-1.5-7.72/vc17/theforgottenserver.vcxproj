@@ -100,7 +100,6 @@
       <TargetMachine>MachineX86</TargetMachine>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>argon2.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -115,7 +114,6 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>argon2.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -137,7 +135,6 @@
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>argon2.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -159,13 +156,10 @@
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>argon2.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\src\actions.cpp" />
-    <ClCompile Include="..\src\authenticationmanager.cpp" />
-    <ClCompile Include="..\src\authenticationservice.cpp" />
     <ClCompile Include="..\src\ban.cpp" />
     <ClCompile Include="..\src\baseevents.cpp" />
     <ClCompile Include="..\src\bed.cpp" />
@@ -219,7 +213,6 @@
     <ClCompile Include="..\src\outfit.cpp" />
     <ClCompile Include="..\src\outputmessage.cpp" />
     <ClCompile Include="..\src\party.cpp" />
-    <ClCompile Include="..\src\passwordhash.cpp" />
     <ClCompile Include="..\src\player.cpp" />
     <ClCompile Include="..\src\position.cpp" />
     <ClCompile Include="..\src\protocol.cpp" />
@@ -253,8 +246,6 @@
   <ItemGroup>
     <ClInclude Include="..\src\account.h" />
     <ClInclude Include="..\src\actions.h" />
-    <ClInclude Include="..\src\authenticationmanager.h" />
-    <ClInclude Include="..\src\authenticationservice.h" />
     <ClInclude Include="..\src\ban.h" />
     <ClInclude Include="..\src\baseevents.h" />
     <ClInclude Include="..\src\bed.h" />
@@ -306,7 +297,6 @@
     <ClInclude Include="..\src\outfit.h" />
     <ClInclude Include="..\src\outputmessage.h" />
     <ClInclude Include="..\src\party.h" />
-    <ClInclude Include="..\src\passwordhash.h" />
     <ClInclude Include="..\src\player.h" />
     <ClInclude Include="..\src\position.h" />
     <ClInclude Include="..\src\protocol.h" />

@@ -35,7 +35,6 @@ else()
     find_package(Crypto++ REQUIRED)
 endif ()
 find_package(fmt 6.1.2 REQUIRED)
-find_package(unofficial-argon2 CONFIG REQUIRED)
 
 # Look for vcpkg-provided libmariadb first
 # If we link to the file directly, we might miss its dependencies from vcpkg
@@ -79,31 +78,12 @@ target_link_libraries(tfs PRIVATE
         Boost::filesystem
         Boost::iostreams
         fmt::fmt
-        unofficial::argon2::libargon2
         ${CMAKE_THREAD_LIBS_INIT}
         ${Crypto++_LIBRARIES}
         ${LUA_LIBRARIES}
         ${MYSQL_CLIENT_LIBS}
         ${PUGIXML_LIBRARIES}
         )
-
-include(CTest)
-if (BUILD_TESTING)
-    add_executable(authentication_tests
-            tests/authentication_tests.cpp
-            src/authenticationservice.cpp
-            src/passwordhash.cpp
-            )
-    set_target_properties(authentication_tests PROPERTIES CXX_STANDARD 17)
-    set_target_properties(authentication_tests PROPERTIES CXX_STANDARD_REQUIRED ON)
-    target_include_directories(authentication_tests PRIVATE src ${Crypto++_INCLUDE_DIR})
-    target_link_libraries(authentication_tests PRIVATE
-            ${Crypto++_LIBRARIES}
-            unofficial::argon2::libargon2
-            Threads::Threads
-            )
-    add_test(NAME authentication_tests COMMAND authentication_tests)
-endif ()
 
 add_executable(player_io_service
         src/playerioservice.cpp

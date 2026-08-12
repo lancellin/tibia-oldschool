@@ -22,7 +22,6 @@
 #include "pugicast.h"
 
 #include "actions.h"
-#include "authenticationmanager.h"
 #include "bed.h"
 #include "checkpointworker.h"
 #include "configmanager.h"
@@ -9567,7 +9566,6 @@ void Game::shutdown()
 {
 	std::cout << "Shutting down..." << std::flush;
 
-	g_authenticationManager.shutdown();
 	g_playerIOManager.shutdown(true);
 	// Commit every captured background checkpoint before tearing the database
 	// down, then stop accepting new work.

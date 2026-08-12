@@ -192,59 +192,10 @@ bool Database::executeQuery(const std::string& query)
 	return success;
 }
 
-bool Database::executeQueryWithAffectedRows(const std::string& query,
-	uint64_t& affectedRows, const std::string& logQuery)
-{
-	affectedRows = 0;
-	if (PlayerIORemoteDatabaseScope::current()) {
-		return false;
-	}
-
-	bool success = true;
-	uint32_t transientRetries = 0;
-	acquireDatabaseLockWithWaitRecording(databaseLock);
-
-	while (mysql_real_query(handle, query.c_str(), query.length()) != 0) {
-		std::cout << "[Error - mysql_real_query] Query: " << logQuery << std::endl
-			<< "Message: " << mysql_error(handle) << std::endl;
-		const auto error = mysql_errno(handle);
-		if (error != CR_SERVER_LOST && error != CR_SERVER_GONE_ERROR &&
-				error != CR_CONN_HOST_ERROR && error != 1053/*ER_SERVER_SHUTDOWN*/ &&
-				error != CR_CONNECTION_ERROR) {
-			success = false;
-			break;
-		}
-		if (!consumeDatabaseTransientRetry(transientRetries)) {
-			success = false;
-			break;
-		}
-		std::this_thread::sleep_for(std::chrono::seconds(1));
-	}
-
-	if (success) {
-		affectedRows = static_cast<uint64_t>(mysql_affected_rows(handle));
-	}
-	MYSQL_RES* result = mysql_store_result(handle);
-	databaseLock.unlock();
-	if (result) {
-		mysql_free_result(result);
-	}
-	return success;
-}
-
 DBResult_ptr Database::storeQuery(const std::string& query)
 {
-	bool querySucceeded = false;
-	return storeQuery(query, querySucceeded);
-}
-
-DBResult_ptr Database::storeQuery(const std::string& query, bool& querySucceeded)
-{
-	querySucceeded = false;
 	if (PlayerIORemoteDatabaseScope* remote = PlayerIORemoteDatabaseScope::current()) {
-		DBResult_ptr result = remote->storeQuery(query);
-		querySucceeded = true;
-		return result;
+		return remote->storeQuery(query);
 	}
 
 	acquireDatabaseLockWithWaitRecording(databaseLock);
@@ -255,8 +206,7 @@ DBResult_ptr Database::storeQuery(const std::string& query, bool& querySucceeded
 		std::cout << "[Error - mysql_real_query] Query: " << query << std::endl << "Message: " << mysql_error(handle) << std::endl;
 		auto error = mysql_errno(handle);
 		if (error != CR_SERVER_LOST && error != CR_SERVER_GONE_ERROR && error != CR_CONN_HOST_ERROR && error != 1053/*ER_SERVER_SHUTDOWN*/ && error != CR_CONNECTION_ERROR) {
-			databaseLock.unlock();
-			return nullptr;
+			break;
 		}
 		if (!consumeDatabaseTransientRetry(transientRetries)) {
 			databaseLock.unlock();
@@ -264,7 +214,6 @@ DBResult_ptr Database::storeQuery(const std::string& query, bool& querySucceeded
 		}
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
-	querySucceeded = true;
 
 	// we should call that every time as someone would call executeQuery('SELECT...')
 	// as it is described in MySQL manual: "it doesn't hurt" :P
@@ -273,12 +222,10 @@ DBResult_ptr Database::storeQuery(const std::string& query, bool& querySucceeded
 		std::cout << "[Error - mysql_store_result] Query: " << query << std::endl << "Message: " << mysql_error(handle) << std::endl;
 		auto error = mysql_errno(handle);
 		if (error != CR_SERVER_LOST && error != CR_SERVER_GONE_ERROR && error != CR_CONN_HOST_ERROR && error != 1053/*ER_SERVER_SHUTDOWN*/ && error != CR_CONNECTION_ERROR) {
-			querySucceeded = false;
 			databaseLock.unlock();
 			return nullptr;
 		}
 		if (!consumeDatabaseTransientRetry(transientRetries)) {
-			querySucceeded = false;
 			databaseLock.unlock();
 			return nullptr;
 		}

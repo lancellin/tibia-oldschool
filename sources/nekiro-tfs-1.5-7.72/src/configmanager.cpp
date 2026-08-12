@@ -216,11 +216,6 @@ bool ConfigManager::load()
 
 		integer[SQL_PORT] = getGlobalNumber(L, "mysqlPort", 3306);
 		integer[PLAYER_IO_SERVICE_PORT] = getGlobalNumber(L, "playerIoServicePort", 7180);
-		integer[AUTH_WORKER_THREADS] = getGlobalNumber(L, "authWorkerThreads", 2);
-		integer[AUTH_QUEUE_CAPACITY] = getGlobalNumber(L, "authQueueCapacity", 64);
-		integer[ARGON2_MEMORY_COST_KIB] = getGlobalNumber(L, "argon2MemoryCostKiB", 65536);
-		integer[ARGON2_TIME_COST] = getGlobalNumber(L, "argon2TimeCost", 3);
-		integer[ARGON2_PARALLELISM] = getGlobalNumber(L, "argon2Parallelism", 1);
 
 		if (integer[GAME_PORT] == 0) {
 			integer[GAME_PORT] = getGlobalNumber(L, "gameProtocolPort", 7172);

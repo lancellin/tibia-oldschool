@@ -81,14 +81,6 @@ class Database
 		bool executeQuery(const std::string& query);
 
 		/**
-		 * Executes a write command and returns its affected-row count while the
-		 * database mutex is still held. logQuery must contain no credentials or
-		 * password hashes and is used instead of query in error output.
-		 */
-		bool executeQueryWithAffectedRows(const std::string& query, uint64_t& affectedRows,
-			const std::string& logQuery);
-
-		/**
 		 * Queries database.
 		 *
 		 * Executes query which generates results (mostly SELECT).
@@ -96,13 +88,6 @@ class Database
 		 * @return results object (nullptr on error)
 		 */
 		DBResult_ptr storeQuery(const std::string& query);
-
-		/**
-		 * Queries the database while distinguishing an empty result set from a
-		 * query/connection failure. querySucceeded is true for a successful SELECT,
-		 * including one that returned no rows.
-		 */
-		DBResult_ptr storeQuery(const std::string& query, bool& querySucceeded);
 
 		/**
 		 * Escapes string for query.
