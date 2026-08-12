@@ -21,6 +21,7 @@
 
 #include "protocolgame.h"
 
+#include "authenticationmanager.h"
 #include "outputmessage.h"
 
 #include "player.h"
@@ -32,7 +33,6 @@
 #include "iologindata.h"
 #include "iomarket.h"
 #include "playeriomanager.h"
-#include "ban.h"
 #include "monsters.h"
 #include "scheduler.h"
 #include "tools.h"
@@ -461,9 +461,13 @@ void ProtocolGame::release()
 	Protocol::release();
 }
 
-void ProtocolGame::login(const std::string& name, uint32_t accountId, OperatingSystem_t operatingSystem)
+void ProtocolGame::login(AuthenticatedPrincipal principal, OperatingSystem_t operatingSystem)
 {
 	//dispatcher thread
+	const std::string name = std::move(principal.characterName);
+	const uint32_t accountId = principal.accountId;
+	const bool characterNamelocked = principal.characterNamelocked;
+	AuthenticationBanInfo accountBan = std::move(principal.accountBan);
 	auto loginMetrics = std::make_shared<DispatcherLoginMetricsTimer>();
 	Player* foundPlayer = g_game.getPlayerByName(name);
 	if (!foundPlayer || g_config.getBoolean(ConfigManager::ALLOW_CLONES)) {
@@ -475,7 +479,8 @@ void ProtocolGame::login(const std::string& name, uint32_t accountId, OperatingS
 
 			ProtocolGame_ptr self = getThis();
 			if (!g_playerIOManager.enqueueLogin(name,
-					[self, name, accountId, operatingSystem, loginMetrics](
+					[self, name, accountId, operatingSystem, loginMetrics,
+						characterNamelocked, accountBan = std::move(accountBan)](
 						std::shared_ptr<const PlayerIOLoginSnapshot> snapshot,
 						const std::string& error) {
 						if (g_game.getGameState() == GAME_STATE_SHUTDOWN) {
@@ -532,7 +537,8 @@ void ProtocolGame::login(const std::string& name, uint32_t accountId, OperatingS
 						IOLoginData::finalizeDeferredGuild(loadingPlayer);
 						self->player = loadingPlayer;
 						g_playerIOManager.releaseLogin(name, snapshot->playerId);
-						self->finishNewPlayerLogin(accountId, operatingSystem, loginMetrics);
+						self->finishNewPlayerLogin(operatingSystem, loginMetrics,
+							characterNamelocked, accountBan);
 					})) {
 				g_playerIOManager.releaseLogin(name);
 				disconnectClient("The character loading service is shutting down.");
@@ -559,7 +565,8 @@ void ProtocolGame::login(const std::string& name, uint32_t accountId, OperatingS
 			return;
 		}
 		fullLoadTimer.stop();
-		finishNewPlayerLogin(accountId, operatingSystem, loginMetrics);
+		finishNewPlayerLogin(operatingSystem, loginMetrics,
+			characterNamelocked, std::move(accountBan));
 		return;
 	} else {
 		if (eventConnect != 0 || !g_config.getBoolean(ConfigManager::REPLACE_KICK_ON_LOGIN)) {
@@ -583,8 +590,9 @@ void ProtocolGame::login(const std::string& name, uint32_t accountId, OperatingS
 	}
 }
 
-bool ProtocolGame::finishNewPlayerLogin(uint32_t accountId, OperatingSystem_t operatingSystem,
-	const std::shared_ptr<DispatcherLoginMetricsTimer>& loginMetrics)
+bool ProtocolGame::finishNewPlayerLogin(OperatingSystem_t operatingSystem,
+	const std::shared_ptr<DispatcherLoginMetricsTimer>& loginMetrics,
+	bool characterNamelocked, AuthenticationBanInfo accountBan)
 {
 	if (g_game.getGameState() == GAME_STATE_SHUTDOWN) {
 		disconnect();
@@ -592,7 +600,7 @@ bool ProtocolGame::finishNewPlayerLogin(uint32_t accountId, OperatingSystem_t op
 	}
 
 	DispatcherPhaseMetricsTimer policyTimer(DispatcherMetricsPhase::LOGIN_POLICY);
-	if (IOBan::isPlayerNamelocked(player->getGUID())) {
+	if (characterNamelocked) {
 		disconnectClient("Your character has been namelocked.");
 		return false;
 	}
@@ -638,20 +646,20 @@ bool ProtocolGame::finishNewPlayerLogin(uint32_t accountId, OperatingSystem_t op
 	}
 
 	if (!player->hasFlag(PlayerFlag_CannotBeBanned)) {
-		BanInfo banInfo;
-		if (IOBan::isAccountBanned(accountId, banInfo)) {
-			if (banInfo.reason.empty()) {
-				banInfo.reason = "(none)";
+		if (accountBan.banned) {
+			if (accountBan.reason.empty()) {
+				accountBan.reason = "(none)";
 			}
 
-			if (banInfo.expiresAt > 0) {
+			if (accountBan.expiresAt > 0) {
 				disconnectClient(fmt::format(
 					"Your account has been banned until {:s} by {:s}.\n\nReason specified:\n{:s}",
-					formatDateShort(banInfo.expiresAt), banInfo.bannedBy, banInfo.reason));
+					formatDateShort(accountBan.expiresAt), accountBan.bannedBy,
+					accountBan.reason));
 			} else {
 				disconnectClient(fmt::format(
 					"Your account has been permanently banned by {:s}.\n\nReason specified:\n{:s}",
-					banInfo.bannedBy, banInfo.reason));
+					accountBan.bannedBy, accountBan.reason));
 			}
 			return false;
 		}
@@ -849,9 +857,6 @@ void ProtocolGame::onRecvFirstMessage(NetworkMessage& msg)
 	std::string characterName = msg.getString();
 	const std::string& password = msg.getString();
 
-	std::string token = "";
-	uint32_t tokenTime = 0;
-
 	/*uint32_t timeStamp = msg.get<uint32_t>();
 	uint8_t randNumber = msg.getByte();
 	if (challengeTimestamp != timeStamp || challengeRandom != randNumber) {
@@ -874,23 +879,35 @@ void ProtocolGame::onRecvFirstMessage(NetworkMessage& msg)
 		return;
 	}
 
-	BanInfo banInfo;
-	if (IOBan::isIpBanned(getIP(), banInfo)) {
-		if (banInfo.reason.empty()) {
-			banInfo.reason = "(none)";
-		}
-
-		disconnectClient(fmt::format("Your IP has been banned until {:s} by {:s}.\n\nReason specified:\n{:s}", formatDateShort(banInfo.expiresAt), banInfo.bannedBy, banInfo.reason));
-		return;
+	AuthenticationRequest request;
+	request.flow = AuthenticationFlow::GAME_WORLD;
+	request.accountName = std::move(accountName);
+	request.password = password;
+	request.characterName = std::move(characterName);
+	request.clientIp = getIP();
+	ProtocolGame_ptr self = getThis();
+	if (!g_authenticationManager.enqueue(std::move(request),
+			[self, operatingSystem](AuthenticationResult result) {
+				if (self->isConnectionExpired()) {
+					return;
+				}
+				if (result.status == AuthenticationStatus::AUTHENTICATED) {
+					self->login(std::move(result.principal), operatingSystem);
+				} else if (result.status == AuthenticationStatus::REJECTED) {
+					self->disconnectClient("Account name or password is not correct.");
+				} else if (result.status == AuthenticationStatus::IP_BANNED) {
+					const std::string reason = result.ipBan.reason.empty() ?
+						"(none)" : result.ipBan.reason;
+					self->disconnectClient(fmt::format(
+						"Your IP has been banned until {:s} by {:s}.\n\nReason specified:\n{:s}",
+						formatDateShort(result.ipBan.expiresAt), result.ipBan.bannedBy, reason));
+				} else {
+					self->disconnectClient(
+						"Login service is temporarily unavailable. Please try again later.");
+				}
+			})) {
+		disconnectClient("Login service is temporarily unavailable. Please try again later.");
 	}
-
-	uint32_t accountId = IOLoginData::gameworldAuthentication(accountName, password, characterName, token, tokenTime);
-	if (accountId == 0) {
-		disconnectClient("Account name or password is not correct.");
-		return;
-	}
-
-	g_dispatcher.addTask(createTask(std::bind(&ProtocolGame::login, getThis(), characterName, accountId, operatingSystem)));
 }
 
 void ProtocolGame::onConnect()

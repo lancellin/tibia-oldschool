@@ -78,6 +78,13 @@ playerIoServiceEnabled = false
 playerIoServiceHost = "127.0.0.1"
 playerIoServicePort = 7180
 
+-- Account authentication workers (separate from durable Player I/O)
+authWorkerThreads = 2
+authQueueCapacity = 64
+argon2MemoryCostKiB = 65536
+argon2TimeCost = 3
+argon2Parallelism = 1
+
 -- Misc.
 -- NOTE: classicAttackSpeed set to true makes players constantly attack at regular
 -- intervals regardless of other actions such as item (potion) use. This setting

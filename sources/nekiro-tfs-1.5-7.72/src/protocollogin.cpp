@@ -21,12 +21,11 @@
 
 #include "protocollogin.h"
 
+#include "authenticationmanager.h"
 #include "outputmessage.h"
 #include "tasks.h"
 
 #include "configmanager.h"
-#include "iologindata.h"
-#include "ban.h"
 #include "game.h"
 
 #include <fmt/format.h>
@@ -45,14 +44,8 @@ void ProtocolLogin::disconnectClient(const std::string& message, uint16_t versio
 	disconnect();
 }
 
-void ProtocolLogin::getCharacterList(const std::string& accountName, const std::string& password, const std::string&, uint16_t version)
+void ProtocolLogin::getCharacterList(const AuthenticatedPrincipal& principal, uint16_t version)
 {
-	Account account;
-	if (!IOLoginData::loginserverAuthentication(accountName, password, account)) {
-		disconnectClient("Account name or password is not correct.", version);
-		return;
-	}
-
 	//uint32_t ticks = time(nullptr) / AUTHENTICATOR_PERIOD;
 
 	auto output = OutputMessagePool::getOutputMessage();
@@ -82,10 +75,10 @@ void ProtocolLogin::getCharacterList(const std::string& accountName, const std::
 	//Add char list
 	output->addByte(0x64);
 
-	uint8_t size = std::min<size_t>(std::numeric_limits<uint8_t>::max(), account.characters.size());
+	uint8_t size = std::min<size_t>(std::numeric_limits<uint8_t>::max(), principal.characters.size());
 	output->addByte(size);
 	for (uint8_t i = 0; i < size; i++) {
-		output->addString(account.characters[i]);
+		output->addString(principal.characters[i]);
 		output->addString(g_config.getString(ConfigManager::SERVER_NAME));
 		output->add<uint32_t>(g_config.getNumber(ConfigManager::IP_NUM));
 		output->add<uint16_t>(g_config.getNumber(ConfigManager::GAME_PORT));
@@ -132,7 +125,7 @@ void ProtocolLogin::getCharacterList(const std::string& accountName, const std::
 	} else {
 		//output->addByte(account.premiumEndsAt > time(nullptr) ? 1 : 0);
 		//output->add<uint32_t>(account.premiumEndsAt);
-		output->add<uint16_t>(std::max<time_t>(0, account.premiumEndsAt - time(nullptr)) / 86400);
+		output->add<uint16_t>(std::max<int64_t>(0, principal.premiumEndsAt - time(nullptr)) / 86400);
 	}
 
 	send(output);
@@ -195,18 +188,8 @@ void ProtocolLogin::onRecvFirstMessage(NetworkMessage& msg)
 		return;
 	}
 
-	BanInfo banInfo;
 	auto connection = getConnection();
 	if (!connection) {
-		return;
-	}
-
-	if (IOBan::isIpBanned(connection->getIP(), banInfo)) {
-		if (banInfo.reason.empty()) {
-			banInfo.reason = "(none)";
-		}
-
-		disconnectClient(fmt::format("Your IP has been banned until {:s} by {:s}.\n\nReason specified:\n{:s}", formatDateShort(banInfo.expiresAt), banInfo.bannedBy, banInfo.reason), version);
 		return;
 	}
 
@@ -238,5 +221,32 @@ void ProtocolLogin::onRecvFirstMessage(NetworkMessage& msg)
 	std::string authToken = msg.getString();*/
 
 	auto thisPtr = std::static_pointer_cast<ProtocolLogin>(shared_from_this());
-	g_dispatcher.addTask(createTask(std::bind(&ProtocolLogin::getCharacterList, thisPtr, accountName, password, "", version)));
+	AuthenticationRequest request;
+	request.flow = AuthenticationFlow::CHARACTER_LIST;
+	request.accountName = accountName;
+	request.password = password;
+	request.clientIp = connection->getIP();
+	if (!g_authenticationManager.enqueue(std::move(request),
+			[thisPtr, version](AuthenticationResult result) {
+				if (thisPtr->isConnectionExpired()) {
+					return;
+				}
+				if (result.status == AuthenticationStatus::AUTHENTICATED) {
+					thisPtr->getCharacterList(result.principal, version);
+				} else if (result.status == AuthenticationStatus::REJECTED) {
+					thisPtr->disconnectClient("Account name or password is not correct.", version);
+				} else if (result.status == AuthenticationStatus::IP_BANNED) {
+					const std::string reason = result.ipBan.reason.empty() ?
+						"(none)" : result.ipBan.reason;
+					thisPtr->disconnectClient(fmt::format(
+						"Your IP has been banned until {:s} by {:s}.\n\nReason specified:\n{:s}",
+						formatDateShort(result.ipBan.expiresAt), result.ipBan.bannedBy, reason),
+						version);
+				} else {
+					thisPtr->disconnectClient(
+						"Login service is temporarily unavailable. Please try again later.", version);
+				}
+			})) {
+		disconnectClient("Login service is temporarily unavailable. Please try again later.", version);
+	}
 }

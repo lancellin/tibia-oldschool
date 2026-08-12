@@ -23,7 +23,7 @@
 struct BanInfo {
 	std::string bannedBy;
 	std::string reason;
-	time_t expiresAt;
+	time_t expiresAt = 0;
 };
 
 struct ConnectBlock {
@@ -50,6 +50,12 @@ class Ban
 class IOBan
 {
 	public:
+		// The lookup variants distinguish a successful "not banned" result from
+		// database failure. Authentication workers use them to fail unavailable.
+		static bool lookupAccountBan(uint32_t accountId, BanInfo& banInfo, bool& banned);
+		static bool lookupIpBan(uint32_t clientIP, BanInfo& banInfo, bool& banned);
+		static bool lookupPlayerNamelock(uint32_t playerId, bool& namelocked);
+
 		static bool isAccountBanned(uint32_t accountId, BanInfo& banInfo);
 		static bool isIpBanned(uint32_t clientIP, BanInfo& banInfo);
 		static bool isPlayerNamelocked(uint32_t playerId);

@@ -7,7 +7,7 @@ param(
     [int]$DatabasePort = 3306,
     [string]$DatabaseUser = "oldschool772",
     [string]$DatabasePassword = "123456",
-    [string]$AccountPasswordSha1 = "7c4a8d09ca3762af61e59520943dc26494f8941b",
+    [string]$AccountPasswordPhc = "",
     [switch]$AssignGridPositions,
     [int]$GridMinX = 33214,
     [int]$GridMaxX = 33278,
@@ -53,15 +53,24 @@ $mysqlArgs = @(
     "-h", $DatabaseHost,
     "-P", $DatabasePort,
     "-u", $DatabaseUser,
-    "--password=$DatabasePassword",
     $Database,
     "--batch",
     "--raw",
     "--skip-column-names"
 )
 
+function Invoke-WithDatabasePassword([scriptblock]$Operation) {
+    $previousPassword = $env:MYSQL_PWD
+    try {
+        $env:MYSQL_PWD = $DatabasePassword
+        return & $Operation
+    } finally {
+        $env:MYSQL_PWD = $previousPassword
+    }
+}
+
 function Invoke-ScalarQuery([string]$Query) {
-    $value = & $mysql @mysqlArgs -e $Query
+    $value = Invoke-WithDatabasePassword { & $mysql @mysqlArgs -e $Query }
     if ($LASTEXITCODE -ne 0) {
         throw "MariaDB query failed."
     }
@@ -83,7 +92,7 @@ function Get-ActorMarkerHex([uint32]$Guid) {
 
 $escapedSourcePlayer = $SourcePlayer.Replace("'", "''")
 $sourceRow = Invoke-ScalarQuery @"
-SELECT p.id, p.account_id, a.premium_ends_at
+SELECT p.id, p.account_id, a.premium_ends_at, a.password
 FROM players p
 JOIN accounts a ON a.id=p.account_id
 WHERE p.name='$escapedSourcePlayer'
@@ -95,8 +104,24 @@ if (-not $sourceRow) {
 }
 
 $sourceParts = $sourceRow.Split("`t")
+if ($sourceParts.Count -lt 4) {
+    throw "Malformed source account row."
+}
 $sourcePlayerId = [uint32]$sourceParts[0]
 $sourcePremiumEndsAt = [uint64]$sourceParts[2]
+$sourcePasswordPhc = if ([string]::IsNullOrWhiteSpace($AccountPasswordPhc)) {
+    $sourceParts[3]
+} else {
+    $AccountPasswordPhc
+}
+if ($sourcePasswordPhc.Length -gt 255 -or
+    $sourcePasswordPhc -notmatch '^\$argon2id\$v=19\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$') {
+    throw (
+        "Load-test accounts require an encoded Argon2id PHC password. " +
+        "Authenticate the source account once to migrate it, or pass " +
+        "-AccountPasswordPhc with a modern value.")
+}
+$escapedPasswordPhc = $sourcePasswordPhc.Replace("'", "''")
 $sourceActorMarker = Get-ActorMarkerHex $sourcePlayerId
 
 $columnCsv = Invoke-ScalarQuery @"
@@ -114,12 +139,13 @@ if (-not $columnCsv) {
     throw "Could not resolve the players table columns."
 }
 
-$itemLines = & $mysql @mysqlArgs -e @"
+$itemLines = Invoke-WithDatabasePassword { & $mysql @mysqlArgs -e @"
 SELECT pid,sid,itemtype,count,HEX(attributes)
 FROM player_items
 WHERE player_id=$sourcePlayerId
 ORDER BY sid;
 "@
+}
 
 if ($LASTEXITCODE -ne 0 -or -not $itemLines) {
     throw "Could not read the source inventory."
@@ -224,7 +250,7 @@ SELECT
         $sql.Add(
             "INSERT INTO accounts " +
             "(name,password,secret,type,premium_ends_at,email,creation) VALUES " +
-            "('$accountName','$AccountPasswordSha1',NULL,1,$sourcePremiumEndsAt,'',$creation);")
+            "('$accountName','$escapedPasswordPhc',NULL,1,$sourcePremiumEndsAt,'',$creation);")
         $sql.Add("SET @new_account=LAST_INSERT_ID();")
         $sql.Add(
             "INSERT INTO players " +
@@ -257,7 +283,8 @@ SELECT
             'WHERE player_id={0};' -f $sourcePlayerId))
         $sql.Add("COMMIT;")
 
-        ($sql -join "`n") | & $mysql @mysqlArgs
+        $sqlText = $sql -join "`n"
+        Invoke-WithDatabasePassword { $sqlText | & $mysql @mysqlArgs }
         if ($LASTEXITCODE -ne 0) {
             throw "Creation transaction failed for $accountName / $characterName."
         }

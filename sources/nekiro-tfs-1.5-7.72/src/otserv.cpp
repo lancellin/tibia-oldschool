@@ -33,6 +33,7 @@
 #include "protocollogin.h"
 #include "protocolstatus.h"
 #include "databasemanager.h"
+#include "authenticationmanager.h"
 #include "playeriomanager.h"
 #include "scheduler.h"
 #include "databasetasks.h"
@@ -101,6 +102,7 @@ int main(int argc, char* argv[])
 		serviceManager.run();
 	} else {
 		std::cout << ">> No services running. The server is NOT online." << std::endl;
+		g_authenticationManager.shutdown();
 		g_playerIOManager.shutdown();
 		g_scheduler.shutdown();
 		g_databaseTasks.shutdown();
@@ -235,7 +237,12 @@ void mainLoader(int, char*[], ServiceManager* services)
 	}
 
 	DatabaseManager::updateDatabase();
+	if (!g_authenticationManager.start()) {
+		startupErrorMessage("Authentication workers are unavailable or misconfigured.");
+		return;
+	}
 	if (!g_playerIOManager.start()) {
+		g_authenticationManager.shutdown();
 		startupErrorMessage("Player I/O service is enabled but unavailable.");
 		return;
 	}

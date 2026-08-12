@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS `accounts` (
   `id` int NOT NULL AUTO_INCREMENT,
   `name` varchar(32) NOT NULL,
-  `password` char(40) NOT NULL,
+  `password` varchar(255) NOT NULL,
   `secret` char(16) DEFAULT NULL,
   `type` int NOT NULL DEFAULT '1',
   `premium_ends_at` int unsigned NOT NULL DEFAULT '0',

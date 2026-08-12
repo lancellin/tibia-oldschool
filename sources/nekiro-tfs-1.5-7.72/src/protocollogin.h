@@ -24,6 +24,7 @@
 
 class NetworkMessage;
 class OutputMessage;
+struct AuthenticatedPrincipal;
 
 class ProtocolLogin : public Protocol
 {
@@ -43,7 +44,7 @@ class ProtocolLogin : public Protocol
 	private:
 		void disconnectClient(const std::string& message, uint16_t version);
 
-		void getCharacterList(const std::string& accountName, const std::string& password, const std::string& token, uint16_t version);
+		void getCharacterList(const AuthenticatedPrincipal& principal, uint16_t version);
 };
 
 #endif
