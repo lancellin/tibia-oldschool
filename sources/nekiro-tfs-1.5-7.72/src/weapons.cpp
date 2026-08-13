@@ -381,6 +381,11 @@ int32_t Weapon::playerWeaponCheck(Player* player, Creature* target, uint8_t shoo
 
 bool Weapon::useWeapon(Player* player, Item* item, Creature* target) const
 {
+	if (Item::items[id].consumeChargesOnUse && item->getCharges() == 0) {
+		g_game.internalRemoveItem(item);
+		return false;
+	}
+
 	int32_t damageModifier = playerWeaponCheck(player, target, item->getShootRange());
 	if (damageModifier == 0) {
 		return false;
@@ -467,6 +472,8 @@ void Weapon::internalUseWeapon(Player* player, Item* item, Tile* tile) const
 
 void Weapon::onUsedWeapon(Player* player, Item* item, Tile* destTile) const
 {
+	const ItemType& itemType = Item::items[item->getID()];
+
 	if (!player->hasFlag(PlayerFlag_NotGainSkill)) {
 		skills_t skillType;
 		uint32_t skillPoint;
@@ -490,6 +497,21 @@ void Weapon::onUsedWeapon(Player* player, Item* item, Tile* destTile) const
 		player->changeSoul(-static_cast<int32_t>(soul));
 	}
 
+	if (itemType.breakChanceOnUse != 0 && uniform_random(1, 100) <= itemType.breakChanceOnUse) {
+		Weapon::decrementItemCount(item);
+		return;
+	}
+
+	if (itemType.consumeChargesOnUse) {
+		const uint16_t charges = item->getCharges();
+		if (charges > 1) {
+			g_game.transformItem(item, item->getID(), charges - 1);
+		} else if (charges == 1) {
+			g_game.internalRemoveItem(item);
+		}
+		return;
+	}
+
 	if (breakChance != 0 && uniform_random(1, 100) <= breakChance) {
 		Weapon::decrementItemCount(item);
 		return;
@@ -511,7 +533,9 @@ void Weapon::onUsedWeapon(Player* player, Item* item, Tile* destTile) const
 		}
 
 		case WEAPONACTION_MOVE:
-			g_game.internalMoveItem(item->getParent(), destTile, INDEX_WHEREEVER, item, 1, nullptr, FLAG_NOLIMIT);
+			if (!itemType.stayEquippedOnUse) {
+				g_game.internalMoveItem(item->getParent(), destTile, INDEX_WHEREEVER, item, 1, nullptr, FLAG_NOLIMIT);
+			}
 			break;
 
 		default:
@@ -600,6 +624,11 @@ void WeaponMelee::configureWeapon(const ItemType& it)
 
 bool WeaponMelee::useWeapon(Player* player, Item* item, Creature* target) const
 {
+	if (Item::items[id].consumeChargesOnUse && item->getCharges() == 0) {
+		g_game.internalRemoveItem(item);
+		return false;
+	}
+
 	int32_t damageModifier = playerWeaponCheck(player, target, item->getShootRange());
 	if (damageModifier == 0) {
 		return false;
@@ -707,6 +736,11 @@ void WeaponDistance::configureWeapon(const ItemType& it)
 
 bool WeaponDistance::useWeapon(Player* player, Item* item, Creature* target) const
 {
+	if (Item::items[id].consumeChargesOnUse && item->getCharges() == 0) {
+		g_game.internalRemoveItem(item);
+		return false;
+	}
+
 	int32_t damageModifier = 0;
 	const ItemType& it = Item::items[id];
 	if (it.weaponType == WEAPON_AMMO) {

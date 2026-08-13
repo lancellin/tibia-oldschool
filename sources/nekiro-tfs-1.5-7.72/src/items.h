@@ -68,6 +68,13 @@ enum ItemParseAttributes_t {
 	ITEM_PARSE_EXTRADEF,
 	ITEM_PARSE_ATTACK,
 	ITEM_PARSE_ATTACK_SPEED,
+	ITEM_PARSE_ATTACK_INTERVAL_PERCENT,
+	ITEM_PARSE_SHIELDING_SKILL_PERCENT,
+	ITEM_PARSE_TRAINING_ITEM,
+	ITEM_PARSE_CONSUME_CHARGES_ON_USE,
+	ITEM_PARSE_CONSUME_CHARGES_ON_SHIELD_BLOCK,
+	ITEM_PARSE_BREAK_CHANCE_ON_USE,
+	ITEM_PARSE_STAY_EQUIPPED_ON_USE,
 	ITEM_PARSE_ROTATETO,
 	ITEM_PARSE_MOVEABLE,
 	ITEM_PARSE_BLOCKPROJECTILE,
@@ -315,6 +322,8 @@ class ItemType
 		std::unique_ptr<ConditionDamage> conditionDamage;
 
 		uint32_t attackSpeed = 0;
+		uint16_t attackIntervalPercent = 100;
+		uint16_t shieldingSkillPercent = 100;
 		uint32_t weight = 0;
 		uint32_t levelDoor = 0;
 		uint32_t decayTime = 0;
@@ -360,6 +369,7 @@ class ItemType
 		uint8_t lightLevel = 0;
 		uint8_t lightColor = 0;
 		uint8_t shootRange = 1;
+		uint8_t breakChanceOnUse = 0;
 		int8_t hitChance = 0;
 
 		bool storeItem = false;
@@ -390,6 +400,10 @@ class ItemType
 		bool lookThrough = false;
 		bool stopTime = false;
 		bool showCount = true;
+		bool trainingItem = false;
+		bool consumeChargesOnUse = false;
+		bool consumeChargesOnShieldBlock = false;
+		bool stayEquippedOnUse = false;
 };
 
 class Items

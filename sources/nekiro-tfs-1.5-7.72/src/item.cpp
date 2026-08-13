@@ -1307,7 +1307,10 @@ std::string Item::getDescription(const ItemType& it, int32_t lookDistance,
 					s << ", Hit%" << std::showpos << static_cast<int16_t>(hitChance) << std::noshowpos;
 				}
 			} else {
-				s << " (Atk:" << attack << ", Def:" << defense;
+				s << " (Atk:" << attack;
+				if (defense != 0 || !it.trainingItem) {
+					s << ", Def:" << defense;
+				}
 			}
 
 			begin = false;
@@ -1357,6 +1360,28 @@ std::string Item::getDescription(const ItemType& it, int32_t lookDistance,
 					s << ' ' << std::showpos << extraDefense << std::noshowpos;
 				}
 			}
+		}
+
+		if (it.attackIntervalPercent != 100) {
+			if (begin) {
+				begin = false;
+				s << " (";
+			} else {
+				s << ", ";
+			}
+
+			s << "attack interval " << std::showpos << (static_cast<int32_t>(it.attackIntervalPercent) - 100) << std::noshowpos << '%';
+		}
+
+		if (it.shieldingSkillPercent != 100) {
+			if (begin) {
+				begin = false;
+				s << " (";
+			} else {
+				s << ", ";
+			}
+
+			s << "shielding " << std::showpos << (static_cast<int32_t>(it.shieldingSkillPercent) - 100) << std::noshowpos << '%';
 		}
 
 		if (it.abilities) {

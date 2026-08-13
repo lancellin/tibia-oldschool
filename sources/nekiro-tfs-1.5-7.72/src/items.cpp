@@ -40,6 +40,13 @@ const std::unordered_map<std::string, ItemParseAttributes_t> ItemParseAttributes
 	{"extradef", ITEM_PARSE_EXTRADEF},
 	{"attack", ITEM_PARSE_ATTACK},
 	{"attackspeed", ITEM_PARSE_ATTACK_SPEED},
+	{"attackintervalpercent", ITEM_PARSE_ATTACK_INTERVAL_PERCENT},
+	{"shieldingskillpercent", ITEM_PARSE_SHIELDING_SKILL_PERCENT},
+	{"trainingitem", ITEM_PARSE_TRAINING_ITEM},
+	{"consumechargesonuse", ITEM_PARSE_CONSUME_CHARGES_ON_USE},
+	{"consumechargesonshieldblock", ITEM_PARSE_CONSUME_CHARGES_ON_SHIELD_BLOCK},
+	{"breakchanceonuse", ITEM_PARSE_BREAK_CHANCE_ON_USE},
+	{"stayequippedonuse", ITEM_PARSE_STAY_EQUIPPED_ON_USE},
 	{"rotateto", ITEM_PARSE_ROTATETO},
 	{"moveable", ITEM_PARSE_MOVEABLE},
 	{"movable", ITEM_PARSE_MOVEABLE},
@@ -660,6 +667,43 @@ void Items::parseItemNode(const pugi::xml_node& itemNode, uint16_t id)
 						std::cout << "[Warning - Items::parseItemNode] AttackSpeed lower than 100 for item: " << it.id << std::endl;
 						it.attackSpeed = 100;
 					}
+					break;
+				}
+
+				case ITEM_PARSE_ATTACK_INTERVAL_PERCENT: {
+					it.attackIntervalPercent = std::max<uint16_t>(1, pugi::cast<uint16_t>(valueAttribute.value()));
+					break;
+				}
+
+				case ITEM_PARSE_SHIELDING_SKILL_PERCENT: {
+					it.shieldingSkillPercent = std::max<uint16_t>(1, pugi::cast<uint16_t>(valueAttribute.value()));
+					break;
+				}
+
+				case ITEM_PARSE_TRAINING_ITEM: {
+					it.trainingItem = valueAttribute.as_bool();
+					break;
+				}
+
+				case ITEM_PARSE_CONSUME_CHARGES_ON_USE: {
+					it.consumeChargesOnUse = valueAttribute.as_bool();
+					break;
+				}
+
+				case ITEM_PARSE_CONSUME_CHARGES_ON_SHIELD_BLOCK: {
+					it.consumeChargesOnShieldBlock = valueAttribute.as_bool();
+					break;
+				}
+
+				case ITEM_PARSE_BREAK_CHANCE_ON_USE: {
+					it.breakChanceOnUse = static_cast<uint8_t>(
+						std::min<uint16_t>(100, pugi::cast<uint16_t>(valueAttribute.value()))
+					);
+					break;
+				}
+
+				case ITEM_PARSE_STAY_EQUIPPED_ON_USE: {
+					it.stayEquippedOnUse = valueAttribute.as_bool();
 					break;
 				}
 

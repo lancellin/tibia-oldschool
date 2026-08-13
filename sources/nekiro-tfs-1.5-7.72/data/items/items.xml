@@ -11522,4 +11522,207 @@
 		<attribute key="charges" value="100"/>
 		<attribute key="showcharges" value="1"/>
 	</item>
+	<!-- Training Items: Common (26379-26383) -->
+	<item id="26379" article="a" name="training sword">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="weaponType" value="sword"/>
+		<attribute key="trainingitem" value="1"/>
+	</item>
+	<item id="26380" article="a" name="training axe">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="weaponType" value="axe"/>
+		<attribute key="trainingitem" value="1"/>
+	</item>
+	<item id="26381" article="a" name="training club">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="weaponType" value="club"/>
+		<attribute key="trainingitem" value="1"/>
+	</item>
+	<item id="26382" article="a" name="training spear">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="10"/>
+		<attribute key="weaponType" value="distance"/>
+		<attribute key="shootType" value="spear"/>
+		<attribute key="range" value="3"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="breakchanceonuse" value="1"/>
+		<attribute key="stayequippedonuse" value="1"/>
+	</item>
+	<item id="26383" article="a" name="training shield">
+		<attribute key="weight" value="1000"/>
+		<attribute key="defense" value="10"/>
+		<attribute key="weaponType" value="shield"/>
+		<attribute key="trainingitem" value="1"/>
+	</item>
+
+	<!-- Training Items: Spark (26384-26388) -->
+	<item id="26384" article="a" name="spark training sword">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="weaponType" value="sword"/>
+		<attribute key="charges" value="3600"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="90"/>
+		<attribute key="consumechargesonuse" value="1"/>
+	</item>
+	<item id="26385" article="a" name="spark training axe">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="weaponType" value="axe"/>
+		<attribute key="charges" value="3600"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="90"/>
+		<attribute key="consumechargesonuse" value="1"/>
+	</item>
+	<item id="26386" article="a" name="spark training club">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="weaponType" value="club"/>
+		<attribute key="charges" value="3600"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="90"/>
+		<attribute key="consumechargesonuse" value="1"/>
+	</item>
+	<item id="26387" article="a" name="spark training spear">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="10"/>
+		<attribute key="weaponType" value="distance"/>
+		<attribute key="shootType" value="spear"/>
+		<attribute key="range" value="3"/>
+		<attribute key="charges" value="3600"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="90"/>
+		<attribute key="consumechargesonuse" value="1"/>
+		<attribute key="stayequippedonuse" value="1"/>
+	</item>
+	<item id="26388" article="a" name="spark training shield">
+		<attribute key="weight" value="1000"/>
+		<attribute key="defense" value="10"/>
+		<attribute key="weaponType" value="shield"/>
+		<attribute key="charges" value="7200"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="shieldingskillpercent" value="110"/>
+		<attribute key="consumechargesonshieldblock" value="1"/>
+	</item>
+
+	<!-- Training Items: Lightning (26389-26393) -->
+	<item id="26389" article="a" name="lightning training sword">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="weaponType" value="sword"/>
+		<attribute key="charges" value="7200"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="80"/>
+		<attribute key="consumechargesonuse" value="1"/>
+	</item>
+	<item id="26390" article="a" name="lightning training axe">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="weaponType" value="axe"/>
+		<attribute key="charges" value="7200"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="80"/>
+		<attribute key="consumechargesonuse" value="1"/>
+	</item>
+	<item id="26391" article="a" name="lightning training club">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="weaponType" value="club"/>
+		<attribute key="charges" value="7200"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="80"/>
+		<attribute key="consumechargesonuse" value="1"/>
+	</item>
+	<item id="26392" article="a" name="lightning training spear">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="10"/>
+		<attribute key="weaponType" value="distance"/>
+		<attribute key="shootType" value="spear"/>
+		<attribute key="range" value="3"/>
+		<attribute key="charges" value="7200"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="80"/>
+		<attribute key="consumechargesonuse" value="1"/>
+		<attribute key="stayequippedonuse" value="1"/>
+	</item>
+	<item id="26393" article="a" name="lightning training shield">
+		<attribute key="weight" value="1000"/>
+		<attribute key="defense" value="10"/>
+		<attribute key="weaponType" value="shield"/>
+		<attribute key="charges" value="14400"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="shieldingskillpercent" value="120"/>
+		<attribute key="consumechargesonshieldblock" value="1"/>
+	</item>
+
+	<!-- Training Items: Infernal (26394-26398) -->
+	<item id="26394" article="an" name="infernal training sword">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="defense" value="5"/>
+		<attribute key="weaponType" value="sword"/>
+		<attribute key="charges" value="10800"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="70"/>
+		<attribute key="consumechargesonuse" value="1"/>
+	</item>
+	<item id="26395" article="an" name="infernal training axe">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="defense" value="5"/>
+		<attribute key="weaponType" value="axe"/>
+		<attribute key="charges" value="10800"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="70"/>
+		<attribute key="consumechargesonuse" value="1"/>
+	</item>
+	<item id="26396" article="an" name="infernal training club">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="5"/>
+		<attribute key="defense" value="5"/>
+		<attribute key="weaponType" value="club"/>
+		<attribute key="charges" value="10800"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="70"/>
+		<attribute key="consumechargesonuse" value="1"/>
+	</item>
+	<item id="26397" article="an" name="infernal training spear">
+		<attribute key="weight" value="1000"/>
+		<attribute key="attack" value="10"/>
+		<attribute key="weaponType" value="distance"/>
+		<attribute key="shootType" value="spear"/>
+		<attribute key="range" value="3"/>
+		<attribute key="charges" value="10800"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="attackintervalpercent" value="70"/>
+		<attribute key="consumechargesonuse" value="1"/>
+		<attribute key="stayequippedonuse" value="1"/>
+	</item>
+	<item id="26398" article="an" name="infernal training shield">
+		<attribute key="weight" value="1000"/>
+		<attribute key="defense" value="10"/>
+		<attribute key="weaponType" value="shield"/>
+		<attribute key="charges" value="21600"/>
+		<attribute key="showcharges" value="1"/>
+		<attribute key="trainingitem" value="1"/>
+		<attribute key="shieldingskillpercent" value="130"/>
+		<attribute key="consumechargesonshieldblock" value="1"/>
+	</item>
 </items>

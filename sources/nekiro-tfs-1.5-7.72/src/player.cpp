@@ -828,11 +828,17 @@ int32_t Player::getArmorReduction(Creature*, CombatType_t) const
 uint32_t Player::getAttackSpeed() const
 {
 	const Item* weapon = getWeapon(true);
-	if (!weapon || weapon->getAttackSpeed() == 0) {
-		return vocation->getAttackSpeed();
+	uint32_t attackSpeed = vocation->getAttackSpeed();
+	if (weapon && weapon->getAttackSpeed() != 0) {
+		attackSpeed = weapon->getAttackSpeed();
 	}
 
-	return weapon->getAttackSpeed();
+	if (!weapon) {
+		return attackSpeed;
+	}
+
+	const uint16_t intervalPercent = Item::items[weapon->getID()].attackIntervalPercent;
+	return std::max<uint32_t>(1, static_cast<uint32_t>((static_cast<uint64_t>(attackSpeed) * intervalPercent + 50) / 100));
 }
 
 float Player::getAttackFactor() const
@@ -2537,9 +2543,40 @@ void Player::onBlockHit()
 	if (shieldBlockCount > 0) {
 		--shieldBlockCount;
 
-		if (hasShield()) {
-			addSkillAdvance(SKILL_SHIELD, 1);
+		if (!hasShield()) {
+			return;
 		}
+
+		Item* shield = inventory[CONST_SLOT_LEFT];
+		if (!shield || shield->getWeaponType() != WEAPON_SHIELD) {
+			shield = inventory[CONST_SLOT_RIGHT];
+		}
+
+		const ItemType& shieldType = Item::items[shield->getID()];
+		if (shieldType.consumeChargesOnShieldBlock && shield->getCharges() == 0) {
+			g_game.internalRemoveItem(shield);
+			return;
+		}
+
+		uint32_t skillTries = 1;
+		if (shieldType.shieldingSkillPercent > 100) {
+			const uint16_t charges = shield->getCharges();
+			const uint64_t usesBefore = shieldType.charges > charges ? shieldType.charges - charges : 0;
+			const uint64_t bonusPercent = shieldType.shieldingSkillPercent - 100;
+			const uint64_t bonusBefore = (usesBefore * bonusPercent) / 100;
+			const uint64_t bonusAfter = ((usesBefore + 1) * bonusPercent) / 100;
+			skillTries += static_cast<uint32_t>(bonusAfter - bonusBefore);
+		}
+		if (shieldType.consumeChargesOnShieldBlock) {
+			const uint16_t charges = shield->getCharges();
+			if (charges > 1) {
+				g_game.transformItem(shield, shield->getID(), charges - 1);
+			} else {
+				g_game.internalRemoveItem(shield);
+			}
+		}
+
+		addSkillAdvance(SKILL_SHIELD, skillTries);
 	}
 }
 
