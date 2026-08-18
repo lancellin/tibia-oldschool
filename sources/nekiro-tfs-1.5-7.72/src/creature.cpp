@@ -777,6 +777,14 @@ bool Creature::dropCorpse(Creature* lastHitCreature, Creature* mostDamageCreatur
 				corpse->setCustomAttribute(unopenedAttribute, true);
 				std::string monsterNameAttribute = ITEM_CUSTOM_ATTRIBUTE_LOOT_MONSTER_NAME;
 				corpse->setCustomAttribute(monsterNameAttribute, getNameDescription());
+
+				// Elite Creatures: mark the corpse so the loot flow can
+				// apply the tier loot-chance multiplier and crystal drops.
+				const Monster* corpseMonster = getMonster();
+				if (corpseMonster->isElite()) {
+					std::string eliteTierAttribute = ITEM_CUSTOM_ATTRIBUTE_ELITE_TIER;
+					corpse->setCustomAttribute(eliteTierAttribute, static_cast<int64_t>(corpseMonster->getEliteTier()));
+				}
 			}
 			g_game.internalAddItem(tile, corpse, INDEX_WHEREEVER, FLAG_NOLIMIT);
 			g_game.startDecay(corpse);

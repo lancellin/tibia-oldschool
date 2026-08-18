@@ -21,6 +21,7 @@ set(tfs_SRC
 	${CMAKE_CURRENT_LIST_DIR}/depotchest.cpp
 	${CMAKE_CURRENT_LIST_DIR}/depotlocker.cpp
 	${CMAKE_CURRENT_LIST_DIR}/dispatchermetrics.cpp
+	${CMAKE_CURRENT_LIST_DIR}/elitecreatures.cpp
 	${CMAKE_CURRENT_LIST_DIR}/events.cpp
 	${CMAKE_CURRENT_LIST_DIR}/fileloader.cpp
 	${CMAKE_CURRENT_LIST_DIR}/floorpersistence.cpp

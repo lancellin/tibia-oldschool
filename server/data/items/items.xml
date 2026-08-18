@@ -11725,4 +11725,24 @@
 		<attribute key="shieldingskillpercent" value="130"/>
 		<attribute key="consumechargesonshieldblock" value="1"/>
 	</item>
+
+	<!-- Evolution Crystals (26399-26401) -->
+	<item id="26399" article="a" name="spark crystal">
+		<attribute key="description" value="Use it on a common training weapon to attempt an evolution into its Spark version. The crystal is consumed in the attempt."/>
+		<attribute key="weight" value="100"/>
+	</item>
+	<item id="26400" article="a" name="lightning crystal">
+		<attribute key="description" value="Use it on a common training weapon to attempt an evolution into its Lightning version. The crystal is consumed in the attempt."/>
+		<attribute key="weight" value="100"/>
+	</item>
+	<item id="26401" article="an" name="infernal crystal">
+		<attribute key="description" value="Use it on a common training weapon to attempt an evolution into its Infernal version. The crystal is consumed in the attempt."/>
+		<attribute key="weight" value="100"/>
+	</item>
+	<item id="26402" article="a" name="lightning portal">
+		<attribute key="description" value="Something is stirring beyond this rift."/>
+	</item>
+	<item id="26403" article="an" name="infernal portal">
+		<attribute key="description" value="Something is stirring beyond this rift."/>
+	</item>
 </items>

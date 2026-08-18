@@ -70,6 +70,10 @@ public:
     void setType(uint8_t type);
     void setIcon(uint8_t icon);
     void setIcons(const std::vector<std::tuple<uint8_t, uint8_t, uint16_t>>& icons);
+    // Elite Creatures: tier (0 = regular) sent by the custom server in the
+    // AddCreature packet; drives the outfit darkening. Stars above the name
+    // are intentionally not implemented yet (deferred cosmetic feature).
+    void setEliteTier(uint8_t tier);
     void setSkullTexture(const std::string& filename);
     void setShieldTexture(const std::string& filename, bool blink);
     void setEmblemTexture(const std::string& filename);
@@ -111,6 +115,8 @@ public:
     uint8_t getEmblem() { return m_emblem; }
     uint8_t getType() { return m_type; }
     uint8_t getIcon() { return m_icon; }
+    uint8_t getEliteTier() const { return m_eliteTier; }
+    bool isElite() const { return m_eliteTier > 0; }
     uint8_t getHealthPercent() { return m_healthPercent; }
     uint8_t getManaPercent() { return m_manaPercent; }
 
@@ -342,6 +348,7 @@ private:
     uint8_t m_icon{ Otc::NpcIconNone };
     uint8_t m_shield{ Otc::ShieldNone };
     uint8_t m_emblem{ Otc::EmblemNone };
+    uint8_t m_eliteTier{ 0 };
 
     // walk related
     uint8_t m_walkAnimationPhase{ 0 };

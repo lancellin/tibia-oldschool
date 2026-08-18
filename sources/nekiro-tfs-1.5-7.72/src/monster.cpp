@@ -24,6 +24,9 @@
 #include "spells.h"
 #include "events.h"
 #include "configmanager.h"
+#include "scheduler.h"
+
+#include <fmt/format.h>
 
 extern Game g_game;
 extern Monsters g_monsters;
@@ -74,6 +77,28 @@ Monster::~Monster()
 {
 	clearTargetList();
 	clearFriendList();
+}
+
+void Monster::setEliteTier(EliteTier tier)
+{
+	eliteTier = tier;
+	if (eliteTier == EliteTier::None) {
+		return;
+	}
+
+	// Elite monsters spawn at full elite health; the base MonsterType is
+	// never modified, only this instance.
+	const double healthMult = EliteCreatures::healthMultiplier(eliteTier);
+	healthMax = static_cast<int32_t>(mType->info.healthMax * healthMult);
+	health = healthMax;
+
+	const double speedMult = EliteCreatures::speedMultiplier(eliteTier);
+	baseSpeed = static_cast<uint32_t>(mType->info.baseSpeed * speedMult);
+
+	// Safety valve: if nobody kills the elite within the tier deadline it
+	// simply vanishes (no loot, no experience).
+	g_scheduler.addEvent(createSchedulerTask(EliteCreatures::despawnDelay(eliteTier),
+		std::bind(&Game::despawnEliteCreature, &g_game, getID())));
 }
 
 void Monster::addList()
@@ -1887,6 +1912,59 @@ void Monster::death(Creature*)
 	clearTargetList();
 	clearFriendList();
 	onIdleStatus();
+
+	summonEliteVariant();
+}
+
+void Monster::summonEliteVariant()
+{
+	// Only regular monsters can originate an elite. Elites never chain
+	// further elites, and summons (lootDrop = false) are excluded since
+	// they leave no corpse for the portal to attach to.
+	if (eliteTier != EliteTier::None || !lootDrop) {
+		return;
+	}
+
+	const EliteTier rolledTier = EliteCreatures::roll();
+	if (rolledTier == EliteTier::None) {
+		return;
+	}
+
+	Tile* tile = getTile();
+	if (!tile) {
+		return;
+	}
+	const Position creaturePos = getPosition();
+
+	SpectatorVec spectators;
+	g_game.map.getSpectators(spectators, creaturePos, false, true);
+
+	Item* portal = Item::CreateItem(EliteCreatures::portalItemId(rolledTier));
+	if (portal) {
+		std::string elitePortalAttribute = ITEM_CUSTOM_ATTRIBUTE_ELITE_PORTAL;
+		portal->setCustomAttribute(elitePortalAttribute, true);
+		portal->setDuration(static_cast<int32_t>(EliteCreatures::PORTAL_DECAY_MS));
+		// The tier 2/3 portal sprites carry the onTop DAT flag, so the
+		// client draws them above corpses and creatures; the tier 1 magic
+		// forcefield keeps its vanilla rendering.
+		g_game.internalAddItem(tile, portal, INDEX_WHEREEVER, FLAG_NOLIMIT);
+	}
+
+	const std::string summonMessage = fmt::format(
+		"An Elite Tier {:d} creature is being summoned.", static_cast<int>(rolledTier));
+	for (Creature* spectator : spectators) {
+		if (Player* tmpPlayer = spectator->getPlayer()) {
+			tmpPlayer->sendTextMessage(MESSAGE_EVENT_ADVANCE, summonMessage);
+		}
+	}
+
+	g_scheduler.addEvent(createSchedulerTask(EliteCreatures::PORTAL_DURATION_MS,
+		std::bind(&Game::spawnEliteCreature, &g_game, creaturePos, mType->name, static_cast<uint8_t>(rolledTier))));
+	// Safety net: the portal ItemType has no decay configured, so the
+	// duration attribute alone never removes it. This second task removes a
+	// portal left behind if the spawn task above could not clean it up.
+	g_scheduler.addEvent(createSchedulerTask(EliteCreatures::PORTAL_DECAY_MS,
+		std::bind(&Game::cleanupElitePortal, &g_game, creaturePos)));
 }
 
 Item* Monster::getCorpse(Creature* lastHitCreature, Creature* mostDamageCreature)

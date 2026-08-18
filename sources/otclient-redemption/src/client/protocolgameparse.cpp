@@ -4194,6 +4194,10 @@ CreaturePtr ProtocolGame::getCreature(const InputMessagePtr& msg, int type) cons
         const uint8_t skull = msg->getU8();
         const uint8_t shield = msg->getU8();
 
+        // Elite Creatures (custom protocol): the server always sends the elite
+        // tier (0 = regular) right after the party shield, for every creature.
+        const uint8_t eliteTier = msg->getU8();
+
         // emblem is sent only when the creature is not known
         uint8_t emblem = 0;
         uint8_t creatureType = 0;
@@ -4278,6 +4282,7 @@ CreaturePtr ProtocolGame::getCreature(const InputMessagePtr& msg, int type) cons
             creature->setSpeed(speed);
             creature->setSkull(skull);
             creature->setShield(shield);
+            creature->setEliteTier(eliteTier);
             creature->setPassable(!unpass);
             creature->setLight(light);
             creature->setMasterId(masterId);

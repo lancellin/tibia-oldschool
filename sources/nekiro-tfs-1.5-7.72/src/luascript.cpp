@@ -2170,6 +2170,7 @@ void LuaScriptInterface::registerFunctions()
 	registerMethod("Game", "createMonsterType", LuaScriptInterface::luaGameCreateMonsterType);
 
 	registerMethod("Game", "startRaid", LuaScriptInterface::luaGameStartRaid);
+	registerMethod("Game", "setForcedEliteTier", LuaScriptInterface::luaGameSetForcedEliteTier);
 
 	registerMethod("Game", "getClientVersion", LuaScriptInterface::luaGameGetClientVersion);
 
@@ -2659,6 +2660,8 @@ void LuaScriptInterface::registerFunctions()
 	registerMethod("Monster", "isMonster", LuaScriptInterface::luaMonsterIsMonster);
 
 	registerMethod("Monster", "getType", LuaScriptInterface::luaMonsterGetType);
+	registerMethod("Monster", "getEliteTier", LuaScriptInterface::luaMonsterGetEliteTier);
+	registerMethod("Monster", "setEliteTier", LuaScriptInterface::luaMonsterSetEliteTier);
 
 	registerMethod("Monster", "rename", LuaScriptInterface::luaMonsterRename);
 
@@ -5245,6 +5248,17 @@ int LuaScriptInterface::luaGameStartRaid(lua_State* L)
 	g_game.raids.setRunning(raid);
 	raid->startRaid();
 	lua_pushnumber(L, RETURNVALUE_NOERROR);
+	return 1;
+}
+
+int LuaScriptInterface::luaGameSetForcedEliteTier(lua_State* L)
+{
+	// Game.setForcedEliteTier(tier[, rolls = 1])
+	// Test hook for GM tooling: forces the tier of the next elite roll(s).
+	const uint8_t tier = std::min<uint8_t>(getNumber<uint8_t>(L, 1, 0), 3);
+	EliteCreatures::forcedTier = tier;
+	EliteCreatures::forcedTierRolls = tier > 0 ? std::max<uint32_t>(getNumber<uint32_t>(L, 2, 1), 1u) : 0;
+	pushBoolean(L, true);
 	return 1;
 }
 
@@ -11142,6 +11156,32 @@ int LuaScriptInterface::luaMonsterGetType(lua_State* L)
 	if (monster) {
 		pushUserdata<MonsterType>(L, monster->mType);
 		setMetatable(L, -1, "MonsterType");
+	} else {
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+int LuaScriptInterface::luaMonsterGetEliteTier(lua_State* L)
+{
+	// monster:getEliteTier()
+	const Monster* monster = getUserdata<const Monster>(L, 1);
+	if (monster) {
+		lua_pushnumber(L, static_cast<uint8_t>(monster->getEliteTier()));
+	} else {
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+int LuaScriptInterface::luaMonsterSetEliteTier(lua_State* L)
+{
+	// monster:setEliteTier(tier)
+	Monster* monster = getUserdata<Monster>(L, 1);
+	if (monster) {
+		const uint8_t tier = getNumber<uint8_t>(L, 2, 0);
+		monster->setEliteTier(static_cast<EliteTier>(std::min<uint8_t>(tier, 3)));
+		pushBoolean(L, true);
 	} else {
 		lua_pushnil(L);
 	}

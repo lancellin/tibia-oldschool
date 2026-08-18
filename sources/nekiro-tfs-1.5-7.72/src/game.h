@@ -938,6 +938,16 @@ class Game
 		uint32_t getBestiaryCharmPoints(uint32_t playerId) const;
 		void playerUnlockCharm(uint32_t playerId, uint8_t charmId);
 
+		// Elite Creatures: delayed spawn of an elite variant after the 
+		// portal interval elapsed at the death position of the origin monster.
+		void spawnEliteCreature(const Position& pos, const std::string& mTypeName, uint8_t eliteTier);
+		// Elite Creatures: safety net removing a portal item that outlived
+		// the spawn delay (e.g. the spawn task failed to remove it).   
+		void cleanupElitePortal(const Position& pos);
+		// Elite Creatures: removes an elite that nobody killed within the
+		// tier deadline (no loot, no experience).
+		void despawnEliteCreature(uint32_t creatureId);
+
 		void startDecay(Item* item);
 
 		int16_t getWorldTime() { return worldTime; }

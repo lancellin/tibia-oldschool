@@ -387,11 +387,33 @@ void Creature::internalDraw(Point dest, const Color& color)
     else
         drawAttachedEffect(originalDest, dest, nullptr, false); // On Bottom
 
+    // Elite Creatures: progressive outfit darkening per tier, applied as a
+    // color multiplication on the regular draw pass. The mark/highlight
+    // re-draw (color != white) keeps its own color untouched. Tier 3 pulses
+    // between its near-black base and red, like the unlooted corpse glow.
+    static constexpr Color ELITE_DARKENING_BY_TIER[] = {
+        Color(0.76f, 0.76f, 0.76f), // Tier 1: light
+        Color(0.49f, 0.49f, 0.49f), // Tier 2: medium
+        Color(0.20f, 0.20f, 0.20f)  // Tier 3: near-black base of the red pulse
+    };
+    Color drawColor = color;
+    if (!replaceColorShader && m_eliteTier > 0 && m_eliteTier <= 3) {
+        drawColor = ELITE_DARKENING_BY_TIER[m_eliteTier - 1];
+        if (m_eliteTier == 3) {
+            // Red peak kept at 60% of the original intensity (0.6x) so the
+            // pulse reads as a glow instead of flooding the sprite with red.
+            static constexpr Color ELITE_PULSE_RED(0.60f, 0.15f, 0.15f);
+            // Same ~2s cadence as the loot-highlight corpse shader (3.19 rad/s).
+            const float phase = (std::sin(g_clock.millis() / 1000.0 * 3.19) + 1.0) / 2.0;
+            drawColor = drawColor + (ELITE_PULSE_RED - drawColor) * phase;
+        }
+    }
+
     if (!isHided()) {
         const int animationPhase = getCurrentAnimationPhase();
 
         for (const auto& paperdoll : m_paperdolls)
-            paperdoll->draw(dest, animationPhase, m_outfit.hasMount(), false, true, color);
+            paperdoll->draw(dest, animationPhase, m_outfit.hasMount(), false, true, drawColor);
 
         // outfit is a real creature
         if (m_outfit.isCreature()) {
@@ -404,7 +426,7 @@ void Creature::internalDraw(Point dest, const Color& color)
                         m_mountShader->setUniformValue(ShaderManager::MOUNT_ID_UNIFORM, m_outfit.getMount());
                     }*/);
                 }
-                getMountThingType()->draw(dest, 0, m_numPatternX, 0, 0, getCurrentAnimationPhase(true), color);
+                getMountThingType()->draw(dest, 0, m_numPatternX, 0, 0, getCurrentAnimationPhase(true), drawColor);
 
                 dest += getDisplacement() * g_drawPool.getScaleFactor();
             }
@@ -423,7 +445,7 @@ void Creature::internalDraw(Point dest, const Color& color)
                         g_drawPool.setShaderProgram(g_shaders.getShaderById(m_shaderId), true/*, shaderAction*/);
                     }
 
-                    datType->draw(dest, 0, m_numPatternX, yPattern, m_numPatternZ, animationPhase, color);
+                    datType->draw(dest, 0, m_numPatternX, yPattern, m_numPatternZ, animationPhase, drawColor);
 
                     if (m_drawOutfitColor && !replaceColorShader && getLayers() > 1) {
                         g_drawPool.setCompositionMode(CompositionMode::MULTIPLY);
@@ -450,7 +472,7 @@ void Creature::internalDraw(Point dest, const Color& color)
             } else drawCreature(dest);
 
             for (const auto& paperdoll : m_paperdolls)
-                paperdoll->draw(dest, animationPhase, m_outfit.hasMount(), true, true, color);
+                paperdoll->draw(dest, animationPhase, m_outfit.hasMount(), true, true, drawColor);
 
             // outfit is a creature imitating an item or the invisible effect
         } else {
@@ -476,7 +498,7 @@ void Creature::internalDraw(Point dest, const Color& color)
 
             if (!replaceColorShader && hasShader())
                 g_drawPool.setShaderProgram(g_shaders.getShaderById(m_shaderId), true/*, shaderAction*/);
-            getThingType()->draw(dest - (getDisplacement() * g_drawPool.getScaleFactor()), 0, 0, 0, 0, animationPhase, color);
+            getThingType()->draw(dest - (getDisplacement() * g_drawPool.getScaleFactor()), 0, 0, 0, 0, animationPhase, drawColor);
         }
     }
 
@@ -1012,6 +1034,11 @@ void Creature::setIconsTexture(const std::string& filename, const Rect& clip, co
 }
 void Creature::setSkullTexture(const std::string& filename) { m_skullTexture = g_textures.getTexture(filename); }
 void Creature::setEmblemTexture(const std::string& filename) { m_emblemTexture = g_textures.getTexture(filename); }
+
+void Creature::setEliteTier(const uint8_t tier)
+{
+    m_eliteTier = tier;
+}
 
 void Creature::setShieldTexture(const std::string& filename, const bool blink)
 {

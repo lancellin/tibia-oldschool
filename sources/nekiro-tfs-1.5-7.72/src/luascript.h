@@ -604,6 +604,7 @@ class LuaScriptInterface
 		static int luaGameCreateMonsterType(lua_State* L);
 
 		static int luaGameStartRaid(lua_State* L);
+		static int luaGameSetForcedEliteTier(lua_State* L);
 
 		static int luaGameGetClientVersion(lua_State* L);
 
@@ -1083,6 +1084,8 @@ class LuaScriptInterface
 		static int luaMonsterIsMonster(lua_State* L);
 
 		static int luaMonsterGetType(lua_State* L);
+		static int luaMonsterGetEliteTier(lua_State* L);
+		static int luaMonsterSetEliteTier(lua_State* L);
 
 		static int luaMonsterRename(lua_State* L);
 

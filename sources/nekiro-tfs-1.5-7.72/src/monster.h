@@ -22,6 +22,7 @@
 
 #include "tile.h"
 #include "monsters.h"
+#include "elitecreatures.h"
 
 class Creature;
 class Game;
@@ -123,6 +124,16 @@ class Monster final : public Creature
 		void setSpawn(Spawn* spawn) {
 			this->spawn = spawn;
 		}
+		EliteTier getEliteTier() const {
+			return eliteTier;
+		}
+		bool isElite() const {
+			return eliteTier != EliteTier::None;
+		}
+		// Applies the tier stat modifiers (max health, base speed) and
+		// marks the monster as elite. Must be called before the monster
+		// is placed in the map; it spawns at full elite health.
+		void setEliteTier(EliteTier tier);
 		bool canWalkOnFieldType(CombatType_t combatType) const;
 
 		void onAttackedCreatureDisappear(bool isLogout) override;
@@ -185,6 +196,8 @@ class Monster final : public Creature
 		static uint32_t monsterAutoID;
 
 	private:
+		void summonEliteVariant();
+
 		CreatureHashSet friendList;
 		CreatureList targetList;
 
@@ -193,6 +206,7 @@ class Monster final : public Creature
 
 		MonsterType* mType;
 		Spawn* spawn = nullptr;
+		EliteTier eliteTier = EliteTier::None;
 
 		int64_t lastMeleeAttack = 0;
 		int64_t nextFollowPathUpdate = 0;
@@ -265,7 +279,10 @@ class Monster final : public Creature
 		bool isOpponent(const Creature* creature) const;
 
 		uint64_t getLostExperience() const override {
-			return skillLoss ? mType->info.experience : 0;
+			if (!skillLoss) {
+				return 0;
+			}
+			return mType->info.experience * EliteCreatures::experienceMultiplier(eliteTier);
 		}
 		uint16_t getLookCorpse() const override {
 			return mType->info.lookcorpse;

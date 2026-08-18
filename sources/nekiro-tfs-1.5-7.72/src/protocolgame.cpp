@@ -34,6 +34,7 @@
 #include "playeriomanager.h"
 #include "ban.h"
 #include "monsters.h"
+#include "monster.h"
 #include "scheduler.h"
 #include "tools.h"
 #include "playershop.h"
@@ -4328,6 +4329,11 @@ void ProtocolGame::AddCreature(NetworkMessage& msg, const Creature* creature, bo
 
 	msg.addByte(player->getSkullClient(creature));
 	msg.addByte(player->getPartyShield(otherPlayer));
+
+	// Elite Creatures: tier (0 = regular) rendered by the custom client
+	// as outfit darkening. Stars above the creature name are deferred.
+	const Monster* creatureMonster = creature->getMonster();
+	msg.addByte(creatureMonster ? static_cast<uint8_t>(creatureMonster->getEliteTier()) : 0);
 
 	/*if (!known) {
 		msg.addByte(player->getGuildEmblem(otherPlayer));

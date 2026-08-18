@@ -8765,6 +8765,19 @@ bool Game::combatChangeHealth(Creature* attacker, Creature* target, CombatDamage
 		damage.primary.value = std::abs(damage.primary.value);
 		damage.secondary.value = std::abs(damage.secondary.value);
 
+		// Elite Creatures: amplify damage dealt by elite monsters. The
+		// origin check keeps the recursive CREATURE_EVENT_HEALTHCHANGE
+		// re-entry (origin reset to ORIGIN_NONE) from stacking the bonus.
+		if (attacker && damage.origin != ORIGIN_NONE) {
+			if (const Monster* attackerMonster = attacker->getMonster()) {
+				const double eliteDamageMult = EliteCreatures::damageMultiplier(attackerMonster->getEliteTier());
+				if (eliteDamageMult > 1.0) {
+					damage.primary.value = static_cast<int32_t>(damage.primary.value * eliteDamageMult);
+					damage.secondary.value = static_cast<int32_t>(damage.secondary.value * eliteDamageMult);
+				}
+			}
+		}
+
 		int32_t healthChange = damage.primary.value + damage.secondary.value;
 		if (healthChange == 0) {
 			return true;
@@ -9301,7 +9314,10 @@ void Game::recordBestiaryKill(Player& player, const Monster& monster)
 	}
 
 	const bool isFirstKill = kills == 0;
-	++kills;
+	const uint32_t previousKills = kills;
+	// Elite Creatures: elite kills count 3x/5x/10x towards the base
+	// creature's bestiary progress.
+	kills += EliteCreatures::bestiaryKillMultiplier(monster.getEliteTier());
 
 	uint16_t newStageReached = 0;
 	if (kills >= bestiaryEntry.killsStage3) {
@@ -9325,13 +9341,15 @@ void Game::recordBestiaryKill(Player& player, const Monster& monster)
 	}
 
 	if (persisted) {
+		// Multi-kill increments can skip over a stage threshold, so detect
+		// completion by crossing it instead of landing exactly on it.
 		uint16_t completedStage = 0;
-		if (kills == bestiaryEntry.killsStage1) {
-			completedStage = 1;
-		} else if (kills == bestiaryEntry.killsStage2) {
-			completedStage = 2;
-		} else if (kills == bestiaryEntry.killsStage3) {
+		if (previousKills < bestiaryEntry.killsStage3 && kills >= bestiaryEntry.killsStage3) {
 			completedStage = 3;
+		} else if (previousKills < bestiaryEntry.killsStage2 && kills >= bestiaryEntry.killsStage2) {
+			completedStage = 2;
+		} else if (previousKills < bestiaryEntry.killsStage1 && kills >= bestiaryEntry.killsStage1) {
+			completedStage = 1;
 		}
 
 		if (!isFirstKill && completedStage == 0) {
@@ -9399,6 +9417,80 @@ void Game::playerUnlockCharm(uint32_t playerId, uint8_t charmId)
 
 	player->sendTextMessage(MESSAGE_EVENT_ADVANCE,
 		fmt::format("{:s} has been unlocked. Visit a charm master to activate it.", definition->name));
+}
+
+void Game::spawnEliteCreature(const Position& pos, const std::string& mTypeName, uint8_t eliteTierValue)
+{
+	const EliteTier tier = static_cast<EliteTier>(eliteTierValue);
+	if (tier == EliteTier::None) {
+		return;
+	}
+
+	// Remove the portal item (if it still exists) before placing the elite.
+	if (Tile* tile = map.getTile(pos)) {
+		if (TileItemVector* items = tile->getItemList()) {
+			for (Item* tileItem : *items) {
+				if (tileItem && tileItem->getCustomAttribute(ITEM_CUSTOM_ATTRIBUTE_ELITE_PORTAL)) {
+					internalRemoveItem(tileItem);
+				}
+			}
+		}
+	}
+
+	Monster* eliteMonster = Monster::createMonster(mTypeName);
+	if (!eliteMonster) {
+		return;
+	}
+
+	eliteMonster->setEliteTier(tier);
+
+	if (!g_events->eventMonsterOnSpawn(eliteMonster, pos, false, true)) {
+		delete eliteMonster;
+		return;
+	}
+
+	// Prefer the exact corpse tile; fall back to a neighbor tile and then
+	// force the corpse tile, mirroring the regular spawn placement path.
+	if (!placeCreature(eliteMonster, pos, false, false) && !placeCreature(eliteMonster, pos, false, true)) {
+		delete eliteMonster;
+		return;
+	}
+
+	eliteMonster->setDirection(DIRECTION_SOUTH);
+}
+
+void Game::cleanupElitePortal(const Position& pos)
+{
+	Tile* tile = map.getTile(pos);
+	if (!tile) {
+		return;
+	}
+
+	TileItemVector* items = tile->getItemList();
+	if (!items) {
+		return;
+	}
+
+	for (Item* tileItem : *items) {
+		if (tileItem && tileItem->getCustomAttribute(ITEM_CUSTOM_ATTRIBUTE_ELITE_PORTAL)) {
+			internalRemoveItem(tileItem);
+		}
+	}
+}
+
+void Game::despawnEliteCreature(uint32_t creatureId)
+{
+	Creature* creature = getCreatureByID(creatureId);
+	if (!creature) {
+		return;
+	}
+
+	Monster* monster = creature->getMonster();
+	if (!monster || !monster->isElite()) {
+		return;
+	}
+
+	removeCreature(monster, false);
 }
 
 void Game::startDecay(Item* item)
