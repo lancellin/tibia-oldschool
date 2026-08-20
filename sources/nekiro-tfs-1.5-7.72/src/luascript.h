@@ -92,6 +92,9 @@ struct LuaTimerEventDesc {
 	int32_t function = -1;
 	std::vector<int32_t> parameters;
 	uint32_t eventId = 0;
+	// NPC that scheduled the event, stored by creature id so the timer
+	// context can be restored safely (the NPC may despawn before it fires).
+	uint32_t npcId = 0;
 
 	LuaTimerEventDesc() = default;
 	LuaTimerEventDesc(LuaTimerEventDesc&& other) = default;
@@ -435,6 +438,11 @@ class LuaScriptInterface
 
 		int32_t eventTableRef = -1;
 		int32_t runningEventId = EVENT_ID_USER;
+
+		// Private environment of the most recently loaded NPC script;
+		// getEvent uses it to capture handlers without leaking globals
+		// (talk_state, messageNN, callbacks) between NPCs.
+		int32_t scriptEnvRef = -1;
 
 		//script file cache
 		std::map<int32_t, std::string> cacheFiles;

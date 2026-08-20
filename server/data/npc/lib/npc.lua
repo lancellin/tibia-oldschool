@@ -198,3 +198,86 @@ function getMoneyWeight(money)
 	end
 	return weight
 end
+
+--------------------------------------------------------------------------
+-- Legacy NPC API compatibility. The ported NPC scripts were written
+-- against an older server; these wrappers translate their calls to the
+-- native TFS 1.5 Lua API so the scripts load and run unchanged.
+--------------------------------------------------------------------------
+
+-- Legacy condition builder (city guard scripts run this at load time).
+function createConditionObject(conditionType, conditionId)
+	return Condition(conditionType, conditionId or CONDITIONID_COMBAT)
+end
+
+function setConditionParam(condition, param, value)
+	if not condition then
+		return false
+	end
+	return condition:setParameter(param, value)
+end
+
+-- Legacy NPC speech with an optional delay in seconds.
+function NPCSay(text, delay)
+	if delay and delay > 0 then
+		doCreatureSayWithDelay(getNpcCid(), text, TALKTYPE_SAY, delay * 1000, {})
+	else
+		selfSay(text)
+	end
+end
+
+-- Buys every EMPTY vial (2006, fluid FLUID_NONE) the player carries at
+-- 5 gold each. Vials holding any fluid are kept. Returns false when
+-- there is nothing to sell.
+function sellPlayerEmptyVials(cid)
+	local player = Player(cid)
+	if not player then
+		return false
+	end
+
+	local amount = player:getItemCount(2006, FLUID_NONE)
+	if amount == 0 then
+		return false
+	end
+
+	if not player:removeItem(2006, amount, FLUID_NONE) then
+		return false
+	end
+
+	player:addMoney(amount * 5)
+	return true
+end
+
+-- Legacy blessing ids 1-5 map directly onto this fork's blessing
+-- indexes (see the 1..5 loop in data/lib/core/player.lua). The native
+-- addBlessing already returns false when the blessing is owned.
+function doPlayerAddBless(cid, blessing)
+	return doPlayerAddBlessing(cid, blessing)
+end
+
+-- World time of day in whole hours (a world day has 1440 world minutes).
+function getTibiaTime()
+	return math.floor(getWorldTime() / 60)
+end
+
+-- Legacy idle request. This fork drives NPC idle state through the
+-- spectator list, so the call is kept as a no-op for ported scripts.
+function selfGotoIdle()
+end
+
+-- Persistent quest point counter. No consumer was ported, but the data
+-- is kept under a dedicated storage key instead of being dropped.
+NPC_QUEST_POINT_STORAGE = 25100
+function doAddQuestPoint(cid)
+	local player = Player(cid)
+	if not player then
+		return false
+	end
+
+	local points = player:getStorageValue(NPC_QUEST_POINT_STORAGE)
+	if points < 0 then
+		points = 0
+	end
+
+	return player:setStorageValue(NPC_QUEST_POINT_STORAGE, points + 1)
+end

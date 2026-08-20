@@ -209,6 +209,20 @@ PlayerCharmState Player::getCharmState(uint8_t charmId) const
 	return it->second;
 }
 
+const PlayerBestiaryProgress* Player::getBestiaryProgress(uint16_t creatureId) const
+{
+	const auto it = bestiaryProgress.find(creatureId);
+	if (it == bestiaryProgress.end()) {
+		return nullptr;
+	}
+	return &it->second;
+}
+
+PlayerBestiaryProgress& Player::getBestiaryProgressEntry(uint16_t creatureId)
+{
+	return bestiaryProgress[creatureId];
+}
+
 bool Player::loadCharmStatesFromDatabase()
 {
 	charmStates.clear();
@@ -1801,7 +1815,10 @@ void Player::onRemoveCreature(Creature* creature, bool isLogout)
 			g_game.internalCloseTrade(this);
 		}
 
-		//closeShopWindow();
+		// No packet: the connection is being torn down; the cleanup still
+		// unreferences the NPC callbacks and removes the player from the
+		// NPC's shop set.
+		closeShopWindow(false);
 
 		clearPartyInvitations();
 

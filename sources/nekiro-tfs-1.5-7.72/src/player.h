@@ -115,6 +115,12 @@ enum class PlayerCharmState : uint8_t {
 	ACTIVE = 2,
 };
 
+struct PlayerBestiaryProgress {
+	uint32_t kills = 0;
+	uint16_t lastStageReached = 0;
+	int64_t createdAt = 0;
+};
+
 enum class CharmEffectType : uint8_t {
 	CRITICAL,
 	LIFE_LEECH,
@@ -565,6 +571,15 @@ class Player final : public Creature, public Cylinder
 		bool activateCharm(uint8_t charmId);
 		uint32_t getSpentCharmPoints() const;
 		void recalculateCharacterBonuses();
+
+		const PlayerBestiaryProgress* getBestiaryProgress(uint16_t creatureId) const;
+		PlayerBestiaryProgress& getBestiaryProgressEntry(uint16_t creatureId);
+		const std::unordered_map<uint16_t, PlayerBestiaryProgress>& getBestiaryProgressMap() const {
+			return bestiaryProgress;
+		}
+		void clearBestiaryProgress() {
+			bestiaryProgress.clear();
+		}
 		const CharacterBonuses& getCharacterBonuses() const {
 			return characterBonuses;
 		}
@@ -1336,6 +1351,7 @@ class Player final : public Creature, public Cylinder
 		std::map<uint32_t, DepotChest*> depotChests;
 		std::map<uint32_t, int32_t> storageMap;
 		std::unordered_map<uint8_t, PlayerCharmState> charmStates;
+		std::unordered_map<uint16_t, PlayerBestiaryProgress> bestiaryProgress;
 		CharacterBonuses characterBonuses;
 
 		std::vector<OutfitEntry> outfits;

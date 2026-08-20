@@ -358,32 +358,23 @@ void addBestiaryOutfit(NetworkMessage& msg, const Outfit_t& outfit)
 	msg.addByte(outfit.lookAddons);
 }
 
-std::vector<BestiaryClientEntry> loadBestiaryEntries(uint32_t playerId)
+std::vector<BestiaryClientEntry> loadBestiaryEntries(const Player& player)
 {
 	std::vector<BestiaryClientEntry> entries;
 
-	Database& db = Database::getInstance();
-	DBResult_ptr result = db.storeQuery(fmt::format(
-		"SELECT bm.`creature_id`, bm.`name`, bm.`kills_stage_1`, bm.`kills_stage_2`, bm.`kills_stage_3`, bm.`charm_points`, "
-		"COALESCE(pbp.`kills`, 0) AS `kills`, COALESCE(pbp.`last_stage_reached`, 0) AS `last_stage_reached` "
-		"FROM `bestiary_monsters` AS bm "
-		"LEFT JOIN `player_bestiary_progress` AS pbp ON pbp.`player_id` = {:d} AND pbp.`creature_id` = bm.`creature_id` "
-		"WHERE bm.`enabled` = 1 ORDER BY bm.`name` ASC",
-		playerId));
-	if (!result) {
-		return entries;
-	}
+	for (const auto& bestiaryIt : g_game.getBestiaryMonsters()) {
+		const BestiaryMonsterEntry& config = bestiaryIt.second;
+		if (!config.enabled) {
+			continue;
+		}
 
-	do {
 		BestiaryClientEntry entry;
-		entry.config.creatureId = result->getNumber<uint16_t>("creature_id");
-		entry.config.killsStage1 = result->getNumber<uint16_t>("kills_stage_1");
-		entry.config.killsStage2 = result->getNumber<uint16_t>("kills_stage_2");
-		entry.config.killsStage3 = result->getNumber<uint16_t>("kills_stage_3");
-		entry.config.charmPoints = result->getNumber<uint16_t>("charm_points");
-		entry.databaseName = result->getString("name");
-		entry.kills = result->getNumber<uint32_t>("kills");
-		entry.lastStageReached = result->getNumber<uint16_t>("last_stage_reached");
+		entry.config = config;
+		entry.databaseName = bestiaryIt.first;
+		if (const PlayerBestiaryProgress* progress = player.getBestiaryProgress(config.creatureId)) {
+			entry.kills = progress->kills;
+			entry.lastStageReached = progress->lastStageReached;
+		}
 		const std::string lookupName = entry.databaseName;
 		entry.monsterType = g_monsters.getMonsterType(lookupName);
 		if (entry.monsterType) {
@@ -393,42 +384,40 @@ std::vector<BestiaryClientEntry> loadBestiaryEntries(uint32_t playerId)
 			entry.displayName = getBestiaryDisplayName(entry.databaseName, nullptr);
 		}
 		entries.emplace_back(std::move(entry));
-	} while (result->next());
+	}
+
+	std::sort(entries.begin(), entries.end(), [](const BestiaryClientEntry& a, const BestiaryClientEntry& b) {
+		return a.databaseName < b.databaseName;
+	});
 
 	return entries;
 }
 
-bool loadBestiaryEntry(uint32_t playerId, uint16_t creatureId, BestiaryClientEntry& entry)
+bool loadBestiaryEntry(const Player& player, uint16_t creatureId, BestiaryClientEntry& entry)
 {
-	Database& db = Database::getInstance();
-	DBResult_ptr result = db.storeQuery(fmt::format(
-		"SELECT bm.`creature_id`, bm.`name`, bm.`kills_stage_1`, bm.`kills_stage_2`, bm.`kills_stage_3`, bm.`charm_points`, "
-		"COALESCE(pbp.`kills`, 0) AS `kills`, COALESCE(pbp.`last_stage_reached`, 0) AS `last_stage_reached` "
-		"FROM `bestiary_monsters` AS bm "
-		"LEFT JOIN `player_bestiary_progress` AS pbp ON pbp.`player_id` = {:d} AND pbp.`creature_id` = bm.`creature_id` "
-		"WHERE bm.`enabled` = 1 AND bm.`creature_id` = {:d} LIMIT 1",
-		playerId, creatureId));
-	if (!result) {
-		return false;
-	}
+	for (const auto& bestiaryIt : g_game.getBestiaryMonsters()) {
+		const BestiaryMonsterEntry& config = bestiaryIt.second;
+		if (!config.enabled || config.creatureId != creatureId) {
+			continue;
+		}
 
-	entry.config.creatureId = result->getNumber<uint16_t>("creature_id");
-	entry.config.killsStage1 = result->getNumber<uint16_t>("kills_stage_1");
-	entry.config.killsStage2 = result->getNumber<uint16_t>("kills_stage_2");
-	entry.config.killsStage3 = result->getNumber<uint16_t>("kills_stage_3");
-	entry.config.charmPoints = result->getNumber<uint16_t>("charm_points");
-	entry.databaseName = result->getString("name");
-	entry.kills = result->getNumber<uint32_t>("kills");
-	entry.lastStageReached = result->getNumber<uint16_t>("last_stage_reached");
-	const std::string lookupName = entry.databaseName;
-	entry.monsterType = g_monsters.getMonsterType(lookupName);
-	if (entry.monsterType) {
-		entry.displayName = getBestiaryDisplayName(entry.databaseName, entry.monsterType);
-		entry.outfit = entry.monsterType->info.outfit;
-	} else {
-		entry.displayName = getBestiaryDisplayName(entry.databaseName, nullptr);
+		entry.config = config;
+		entry.databaseName = bestiaryIt.first;
+		if (const PlayerBestiaryProgress* progress = player.getBestiaryProgress(creatureId)) {
+			entry.kills = progress->kills;
+			entry.lastStageReached = progress->lastStageReached;
+		}
+		const std::string lookupName = entry.databaseName;
+		entry.monsterType = g_monsters.getMonsterType(lookupName);
+		if (entry.monsterType) {
+			entry.displayName = getBestiaryDisplayName(entry.databaseName, entry.monsterType);
+			entry.outfit = entry.monsterType->info.outfit;
+		} else {
+			entry.displayName = getBestiaryDisplayName(entry.databaseName, nullptr);
+		}
+		return true;
 	}
-	return true;
+	return false;
 }
 
 }
@@ -3934,7 +3923,7 @@ void ProtocolGame::sendBestiaryRaces()
 		return;
 	}
 
-	const auto entries = loadBestiaryEntries(player->getGUID());
+	const auto entries = loadBestiaryEntries(*player);
 
 	uint16_t unlockedCreatures = 0;
 	uint16_t unlockedBosses = 0;
@@ -3976,7 +3965,7 @@ void ProtocolGame::sendBestiaryCharmsData()
 	}
 
 	player->loadCharmStatesFromDatabase();
-	const auto entries = loadBestiaryEntries(player->getGUID());
+	const auto entries = loadBestiaryEntries(*player);
 
 	std::vector<uint16_t> finishedMonsters;
 	finishedMonsters.reserve(entries.size());
@@ -3989,7 +3978,7 @@ void ProtocolGame::sendBestiaryCharmsData()
 		finishedMonsters.emplace_back(entry.config.creatureId);
 	}
 
-	const uint32_t earnedCharmPoints = g_game.getBestiaryCharmPoints(player->getGUID());
+	const uint32_t earnedCharmPoints = g_game.getBestiaryCharmPoints(*player);
 	const uint32_t spentCharmPoints = player->getSpentCharmPoints();
 	const uint32_t availableCharmPoints = earnedCharmPoints > spentCharmPoints ? earnedCharmPoints - spentCharmPoints : 0;
 	const auto& charmDefinitions = getCharmDefinitions();
@@ -4106,7 +4095,7 @@ void ProtocolGame::sendBestiaryOverview(const std::string& categoryName, bool se
 		return;
 	}
 
-	const auto entries = loadBestiaryEntries(player->getGUID());
+	const auto entries = loadBestiaryEntries(*player);
 	std::unordered_set<uint16_t> requestedIds(creatureIds.begin(), creatureIds.end());
 
 	auto output = OutputMessagePool::getOutputMessage();
@@ -4150,7 +4139,7 @@ void ProtocolGame::sendBestiaryMonsterData(uint16_t creatureId)
 	}
 
 	BestiaryClientEntry entry;
-	if (!loadBestiaryEntry(player->getGUID(), creatureId, entry)) {
+	if (!loadBestiaryEntry(*player, creatureId, entry)) {
 		return;
 	}
 

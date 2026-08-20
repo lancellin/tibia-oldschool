@@ -965,4 +965,15 @@ if NpcHandler == nil then
 			end
 		end, self.talkDelayTime * 1000, Npc():getId(), message, focus)
 	end
+
+	-- Says a single story line, optionally delayed by the given amount of
+	-- seconds. Ported scripts rely on this method (Alesar, Aneus, Zoltan
+	-- and others); say() already implements both behaviors.
+	function NpcHandler:story(message, delay)
+		if delay then
+			self:say(message, delay)
+		else
+			self:say(message)
+		end
+	end
 end

@@ -125,6 +125,7 @@ void ScriptEnvironment::resetEnv()
 	callbackId = 0;
 	timerEvent = false;
 	interface = nullptr;
+	curNpc = nullptr;
 	localMap.clear();
 	tempResults.clear();
 
@@ -374,6 +375,33 @@ int32_t LuaScriptInterface::loadFile(const std::string& file, Npc* npc /* = null
 	env->setScriptId(EVENT_ID_LOADING, this);
 	env->setNpc(npc);
 
+	// NPC scripts run in a private environment that falls back to the
+	// globals table, so per-script state (talk_state, messageNN and the
+	// like) cannot leak between NPCs sharing this Lua state.
+	if (npc) {
+		lua_newtable(luaState);
+		lua_newtable(luaState);
+#if LUA_VERSION_NUM < 502
+		lua_pushvalue(luaState, LUA_GLOBALSINDEX);
+#else
+		lua_rawgeti(luaState, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);
+#endif
+		lua_setfield(luaState, -2, "__index");
+		lua_setmetatable(luaState, -2);
+
+		lua_pushvalue(luaState, -1);
+		if (scriptEnvRef != -1) {
+			luaL_unref(luaState, LUA_REGISTRYINDEX, scriptEnvRef);
+		}
+		scriptEnvRef = luaL_ref(luaState, LUA_REGISTRYINDEX);
+
+#if LUA_VERSION_NUM < 502
+		lua_setfenv(luaState, -2);
+#else
+		lua_setupvalue(luaState, -2, 1);
+#endif
+	}
+
 	//execute it
 	ret = protectedCall(luaState, 0, 0);
 	if (ret != 0) {
@@ -396,7 +424,15 @@ int32_t LuaScriptInterface::getEvent(const std::string& eventName)
 	}
 
 	//get current event function pointer
-	lua_getglobal(luaState, eventName.c_str());
+	if (scriptEnvRef != -1) {
+		// NPC scripts define their handlers inside the private script
+		// environment; the __index metamethod falls back to globals.
+		lua_rawgeti(luaState, LUA_REGISTRYINDEX, scriptEnvRef);
+		lua_getfield(luaState, -1, eventName.c_str());
+		lua_remove(luaState, -2);
+	} else {
+		lua_getglobal(luaState, eventName.c_str());
+	}
 	if (!isFunction(luaState, -1)) {
 		lua_pop(luaState, 2);
 		return -1;
@@ -573,6 +609,11 @@ bool LuaScriptInterface::closeState()
 	if (eventTableRef != -1) {
 		luaL_unref(luaState, LUA_REGISTRYINDEX, eventTableRef);
 		eventTableRef = -1;
+	}
+
+	if (scriptEnvRef != -1) {
+		luaL_unref(luaState, LUA_REGISTRYINDEX, scriptEnvRef);
+		scriptEnvRef = -1;
 	}
 
 	luaState = nullptr;
@@ -3882,6 +3923,9 @@ int LuaScriptInterface::luaAddEvent(lua_State* L)
 
 	eventDesc.function = luaL_ref(L, LUA_REGISTRYINDEX);
 	eventDesc.scriptId = getScriptEnv()->getScriptId();
+	if (const Npc* npc = getScriptEnv()->getNpc()) {
+		eventDesc.npcId = npc->getID();
+	}
 
 	auto& lastTimerEventId = g_luaEnvironment.lastEventTimerId;
 	eventDesc.eventId = g_scheduler.addEvent(createSchedulerTask(
@@ -18217,6 +18261,11 @@ void LuaEnvironment::executeTimerEvent(uint32_t eventIndex)
 		ScriptEnvironment* env = getScriptEnv();
 		env->setTimerEvent();
 		env->setScriptId(timerEventDesc.scriptId, this);
+		if (timerEventDesc.npcId != 0) {
+			if (Creature* creature = g_game.getCreatureByID(timerEventDesc.npcId)) {
+				env->setNpc(creature->getNpc());
+			}
+		}
 		callFunction(timerEventDesc.parameters.size());
 	} else {
 		std::cout << "[Error - LuaScriptInterface::executeTimerEvent] Call stack overflow" << std::endl;

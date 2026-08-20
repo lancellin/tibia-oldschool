@@ -9299,25 +9299,15 @@ void Game::recordBestiaryKill(Player& player, const Monster& monster)
 		return;
 	}
 
-	Database& db = Database::getInstance();
-	const uint32_t playerId = player.getGUID();
 	const uint16_t creatureId = bestiaryEntry.creatureId;
 
-	uint32_t kills = 0;
-	bool hasProgress = false;
+	const PlayerBestiaryProgress* progress = player.getBestiaryProgress(creatureId);
+	const uint32_t previousKills = progress ? progress->kills : 0;
+	const bool isFirstKill = previousKills == 0;
 
-	if (DBResult_ptr result = db.storeQuery(fmt::format(
-		"SELECT `kills`, `last_stage_reached` FROM `player_bestiary_progress` WHERE `player_id` = {:d} AND `creature_id` = {:d}",
-		playerId, creatureId))) {
-		kills = result->getNumber<uint32_t>("kills");
-		hasProgress = true;
-	}
-
-	const bool isFirstKill = kills == 0;
-	const uint32_t previousKills = kills;
 	// Elite Creatures: elite kills count 3x/5x/10x towards the base
 	// creature's bestiary progress.
-	kills += EliteCreatures::bestiaryKillMultiplier(monster.getEliteTier());
+	uint32_t kills = previousKills + EliteCreatures::bestiaryKillMultiplier(monster.getEliteTier());
 
 	uint16_t newStageReached = 0;
 	if (kills >= bestiaryEntry.killsStage3) {
@@ -9328,62 +9318,66 @@ void Game::recordBestiaryKill(Player& player, const Monster& monster)
 		newStageReached = 1;
 	}
 
-	const int64_t timestamp = OTSYS_TIME();
-	bool persisted = false;
-	if (hasProgress) {
-		persisted = db.executeQuery(fmt::format(
-			"UPDATE `player_bestiary_progress` SET `kills` = {:d}, `last_stage_reached` = {:d}, `updated_at` = {:d} WHERE `player_id` = {:d} AND `creature_id` = {:d}",
-			kills, newStageReached, timestamp, playerId, creatureId));
-	} else {
-		persisted = db.executeQuery(fmt::format(
-			"INSERT INTO `player_bestiary_progress` (`player_id`, `creature_id`, `kills`, `last_stage_reached`, `created_at`, `updated_at`) VALUES ({:d}, {:d}, {:d}, {:d}, {:d}, {:d})",
-			playerId, creatureId, kills, newStageReached, timestamp, timestamp));
+	PlayerBestiaryProgress& progressEntry = player.getBestiaryProgressEntry(creatureId);
+	progressEntry.kills = kills;
+	progressEntry.lastStageReached = newStageReached;
+	if (progressEntry.createdAt == 0) {
+		progressEntry.createdAt = OTSYS_TIME();
 	}
 
-	if (persisted) {
-		// Multi-kill increments can skip over a stage threshold, so detect
-		// completion by crossing it instead of landing exactly on it.
-		uint16_t completedStage = 0;
-		if (previousKills < bestiaryEntry.killsStage3 && kills >= bestiaryEntry.killsStage3) {
-			completedStage = 3;
-		} else if (previousKills < bestiaryEntry.killsStage2 && kills >= bestiaryEntry.killsStage2) {
-			completedStage = 2;
-		} else if (previousKills < bestiaryEntry.killsStage1 && kills >= bestiaryEntry.killsStage1) {
-			completedStage = 1;
-		}
+	// Multi-kill increments can skip over a stage threshold, so detect
+	// completion by crossing it instead of landing exactly on it.
+	uint16_t completedStage = 0;
+	if (previousKills < bestiaryEntry.killsStage3 && kills >= bestiaryEntry.killsStage3) {
+		completedStage = 3;
+	} else if (previousKills < bestiaryEntry.killsStage2 && kills >= bestiaryEntry.killsStage2) {
+		completedStage = 2;
+	} else if (previousKills < bestiaryEntry.killsStage1 && kills >= bestiaryEntry.killsStage1) {
+		completedStage = 1;
+	}
 
-		if (!isFirstKill && completedStage == 0) {
-			return;
-		}
+	if (!isFirstKill && completedStage == 0) {
+		return;
+	}
 
-		const Outfit_t outfit = monster.getDefaultOutfit();
-		const auto sendBestiaryBanner = [&](uint16_t stage) {
-			player.sendExtendedOpcode(BESTIARY_UNLOCK_EXTENDED_OPCODE,
-				fmt::format("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-					stage, creatureId, outfit.lookType, outfit.lookTypeEx, outfit.lookMount,
-					static_cast<uint16_t>(outfit.lookHead), static_cast<uint16_t>(outfit.lookBody),
-					static_cast<uint16_t>(outfit.lookLegs), static_cast<uint16_t>(outfit.lookFeet),
-					static_cast<uint16_t>(outfit.lookAddons), monster.getName()));
-		};
+	const Outfit_t outfit = monster.getDefaultOutfit();
+	const auto sendBestiaryBanner = [&](uint16_t stage) {
+		player.sendExtendedOpcode(BESTIARY_UNLOCK_EXTENDED_OPCODE,
+			fmt::format("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+				stage, creatureId, outfit.lookType, outfit.lookTypeEx, outfit.lookMount,
+				static_cast<uint16_t>(outfit.lookHead), static_cast<uint16_t>(outfit.lookBody),
+				static_cast<uint16_t>(outfit.lookLegs), static_cast<uint16_t>(outfit.lookFeet),
+				static_cast<uint16_t>(outfit.lookAddons), monster.getName()));
+	};
 
-		if (isFirstKill) {
-			sendBestiaryBanner(0);
-		}
-		if (completedStage != 0) {
-			sendBestiaryBanner(completedStage);
-		}
+	if (isFirstKill) {
+		sendBestiaryBanner(0);
+	}
+	if (completedStage != 0) {
+		sendBestiaryBanner(completedStage);
 	}
 }
 
-uint32_t Game::getBestiaryCharmPoints(uint32_t playerId) const
+const std::unordered_map<std::string, BestiaryMonsterEntry>& Game::getBestiaryMonsters() const
 {
-	DBResult_ptr result = Database::getInstance().storeQuery(fmt::format(
-		"SELECT COALESCE(SUM(bm.`charm_points`), 0) AS `total` "
-		"FROM `bestiary_monsters` bm "
-		"INNER JOIN `player_bestiary_progress` pbp ON pbp.`creature_id` = bm.`creature_id` "
-		"WHERE pbp.`player_id` = {:d} AND bm.`enabled` = 1 AND pbp.`kills` >= bm.`kills_stage_3`",
-		playerId));
-	return result ? result->getNumber<uint32_t>("total") : 0;
+	return bestiaryMonsters;
+}
+
+uint32_t Game::getBestiaryCharmPoints(const Player& player) const
+{
+	uint32_t total = 0;
+	for (const auto& bestiaryIt : bestiaryMonsters) {
+		const BestiaryMonsterEntry& entry = bestiaryIt.second;
+		if (!entry.enabled) {
+			continue;
+		}
+
+		const PlayerBestiaryProgress* progress = player.getBestiaryProgress(entry.creatureId);
+		if (progress && progress->kills >= entry.killsStage3) {
+			total += entry.charmPoints;
+		}
+	}
+	return total;
 }
 
 void Game::playerUnlockCharm(uint32_t playerId, uint8_t charmId)
@@ -9401,7 +9395,7 @@ void Game::playerUnlockCharm(uint32_t playerId, uint8_t charmId)
 		return;
 	}
 
-	const uint32_t earnedPoints = getBestiaryCharmPoints(player->getGUID());
+	const uint32_t earnedPoints = getBestiaryCharmPoints(*player);
 	const uint32_t spentPoints = player->getSpentCharmPoints();
 	const uint32_t availablePoints = earnedPoints > spentPoints ? earnedPoints - spentPoints : 0;
 	if (availablePoints < definition->unlockCost) {

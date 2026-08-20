@@ -934,8 +934,9 @@ class Game
 		void loadAccountStorageValues();
 		bool saveAccountStorageValues() const;
 		void loadBestiaryMonsters();
+		const std::unordered_map<std::string, BestiaryMonsterEntry>& getBestiaryMonsters() const;
 		void recordBestiaryKill(Player& player, const Monster& monster);
-		uint32_t getBestiaryCharmPoints(uint32_t playerId) const;
+		uint32_t getBestiaryCharmPoints(const Player& player) const;
 		void playerUnlockCharm(uint32_t playerId, uint8_t charmId);
 
 		// Elite Creatures: delayed spawn of an elite variant after the 

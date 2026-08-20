@@ -32,9 +32,9 @@ NpcScriptInterface* Npc::scriptInterface = nullptr;
 void Npcs::reload()
 {
 	const std::map<uint32_t, Npc*>& npcs = g_game.getNpcs();
-	/*for (const auto& it : npcs) {
+	for (const auto& it : npcs) {
 		it.second->closeAllShopWindows();
-	}*/
+	}
 
 	delete Npc::scriptInterface;
 	Npc::scriptInterface = nullptr;
@@ -296,7 +296,7 @@ void Npc::onRemoveCreature(Creature* creature, bool isLogout)
 	Creature::onRemoveCreature(creature, isLogout);
 
 	if (creature == this) {
-		//closeAllShopWindows();
+		closeAllShopWindows();
 		if (npcEventHandler) {
 			npcEventHandler->onCreatureDisappear(creature);
 		}

@@ -272,6 +272,9 @@ std::vector<std::string> IOLoginData::buildPlayerLoadQueries(
 		"SELECT `charm_id`, `state` FROM `player_charms` WHERE `player_id` = {:d}",
 		playerId));
 	queries.emplace_back(fmt::format(
+		"SELECT `creature_id`, `kills`, `last_stage_reached`, `created_at` FROM "
+		"`player_bestiary_progress` WHERE `player_id` = {:d}", playerId));
+	queries.emplace_back(fmt::format(
 		"SELECT `player_id` FROM `account_viplist` WHERE `account_id` = {:d}",
 		accountId));
 	return queries;
@@ -696,6 +699,15 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result, bool deferGuil
 	player->loadCharmStatesFromDatabase();
 	charmsTimer.stop();
 
+	if ((result = db.storeQuery(fmt::format("SELECT `creature_id`, `kills`, `last_stage_reached`, `created_at` FROM `player_bestiary_progress` WHERE `player_id` = {:d}", player->getGUID())))) {
+		do {
+			PlayerBestiaryProgress& progress = player->getBestiaryProgressEntry(result->getNumber<uint16_t>("creature_id"));
+			progress.kills = result->getNumber<uint32_t>("kills");
+			progress.lastStageReached = result->getNumber<uint16_t>("last_stage_reached");
+			progress.createdAt = result->getNumber<int64_t>("created_at");
+		} while (result->next());
+	}
+
 	//load vip list
 	DispatcherPhaseMetricsTimer vipTimer(DispatcherMetricsPhase::LOGIN_LOAD_VIP);
 	if ((result = db.storeQuery(fmt::format("SELECT `player_id` FROM `account_viplist` WHERE `account_id` = {:d}", player->getAccount())))) {
@@ -1105,6 +1117,7 @@ bool IOLoginData::savePlayerData(Player* player)
 				return false;
 			}
 		}
+		player->clearBestiaryProgress();
 	}
 
 	// learned spells
@@ -1126,6 +1139,29 @@ bool IOLoginData::savePlayerData(Player* player)
 		return false;
 	}
 	spellsTimer.stop();
+
+	// bestiary progress (already wiped by the Rookgaard reset block above)
+	if (!player->rookgaardResetPending) {
+		if (!db.executeQuery(fmt::format("DELETE FROM `player_bestiary_progress` WHERE `player_id` = {:d}", player->getGUID()))) {
+			return false;
+		}
+
+		DBInsert bestiaryQuery("INSERT INTO `player_bestiary_progress` (`player_id`, `creature_id`, `kills`, `last_stage_reached`, `created_at`, `updated_at`) VALUES ");
+		const int64_t bestiaryTimestamp = OTSYS_TIME();
+		for (const auto& progressIt : player->getBestiaryProgressMap()) {
+			const PlayerBestiaryProgress& progress = progressIt.second;
+			const int64_t createdAt = progress.createdAt != 0 ? progress.createdAt : bestiaryTimestamp;
+			if (!bestiaryQuery.addRow(fmt::format("{:d}, {:d}, {:d}, {:d}, {:d}, {:d}",
+					player->getGUID(), progressIt.first, progress.kills, progress.lastStageReached,
+					createdAt, bestiaryTimestamp))) {
+				return false;
+			}
+		}
+
+		if (!bestiaryQuery.execute()) {
+			return false;
+		}
+	}
 
 	DispatcherPhaseMetricsTimer inventoryTimer(
 		DispatcherMetricsPhase::LOGOUT_SAVE_INVENTORY,
