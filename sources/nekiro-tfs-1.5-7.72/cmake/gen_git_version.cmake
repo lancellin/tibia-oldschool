@@ -27,7 +27,7 @@ if(GIT_EXECUTABLE)
 	endif()
 
 	execute_process(
-		COMMAND ${GIT_EXECUTABLE} status --porcelain
+		COMMAND ${GIT_EXECUTABLE} status --porcelain --untracked-files=no
 		WORKING_DIRECTORY ${SOURCE_DIR}
 		OUTPUT_VARIABLE _status OUTPUT_STRIP_TRAILING_WHITESPACE
 		ERROR_QUIET)

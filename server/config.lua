@@ -115,16 +115,6 @@ depotPremiumLimit = 10000
 -- to make use of the function setWorldLight(level, color)
 defaultWorldLight = true
 
--- Spectator cache instrumentation (audit item A2, A/B test)
--- spectatorCacheMetrics: writes spectator_cache_metrics_<variant>.csv (10s windows)
--- spectatorCacheRegionalInvalidation: true = regional (variant 0.2.7.y),
---   false = legacy global clear (variant 0.2.7.x)
--- spectatorCacheShadowValidate: re-scans on every cache hit and compares;
---   test-only (doubles spectator cost), mismatches are logged
-spectatorCacheMetrics = true
-spectatorCacheRegionalInvalidation = false
-spectatorCacheShadowValidate = false
-
 -- Floor persistence stage 3 shadow snapshots
 -- Captures dirty floor tiles in the database. Startup replay remains disabled.
 floorPersistenceShadowEnabled = true

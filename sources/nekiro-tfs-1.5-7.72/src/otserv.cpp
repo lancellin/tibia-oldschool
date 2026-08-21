@@ -26,7 +26,6 @@
 #include "iomarket.h"
 
 #include "configmanager.h"
-#include "spectatorcachemetrics.h"
 #include "scriptmanager.h"
 #include "rsa.h"
 #include "camforensics.h"
@@ -187,7 +186,6 @@ void mainLoader(int, char*[], ServiceManager* services)
 		startupErrorMessage("Unable to load " + configFile + "!");
 		return;
 	}
-	g_spectatorCacheMetrics.loadConfig();
 
 #ifdef _WIN32
 	const std::string& defaultPriority = g_config.getString(ConfigManager::DEFAULT_PRIORITY);

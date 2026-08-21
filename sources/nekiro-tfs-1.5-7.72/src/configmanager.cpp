@@ -269,9 +269,6 @@ bool ConfigManager::load()
 	boolean[DISABLE_MONSTER_SPAWNS] = getGlobalBoolean(L, "disableMonsterSpawns", false);
 	boolean[PLAYER_CONSOLE_LOGS] = getGlobalBoolean(L, "showPlayerLogInConsole", true);
 	boolean[FLOOR_PERSISTENCE_SHADOW_ENABLED] = getGlobalBoolean(L, "floorPersistenceShadowEnabled", false);
-	boolean[SPECTATOR_CACHE_METRICS] = getGlobalBoolean(L, "spectatorCacheMetrics", false);
-	boolean[SPECTATOR_CACHE_REGIONAL_INVALIDATION] = getGlobalBoolean(L, "spectatorCacheRegionalInvalidation", true);
-	boolean[SPECTATOR_CACHE_SHADOW_VALIDATE] = getGlobalBoolean(L, "spectatorCacheShadowValidate", false);
 
 	string[DEFAULT_PRIORITY] = getGlobalString(L, "defaultPriority", "high");
 	string[SERVER_NAME] = getGlobalString(L, "serverName", "");

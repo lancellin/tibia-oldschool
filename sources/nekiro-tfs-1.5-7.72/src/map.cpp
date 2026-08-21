@@ -25,9 +25,6 @@
 #include "creature.h"
 #include "game.h"
 #include "monster.h"
-#include "spectatorcachemetrics.h"
-
-#include <chrono>
 
 extern Game g_game;
 
@@ -48,29 +45,6 @@ void spectatorMultifloorZRange(int32_t centerZ, int32_t& minRangeZ, int32_t& max
 		minRangeZ = 0;
 		maxRangeZ = 7;
 	}
-}
-
-bool spectatorSetsEqual(const SpectatorVec& a, const SpectatorVec& b)
-{
-	if (a.size() != b.size()) {
-		return false;
-	}
-
-	std::vector<uint32_t> idsA;
-	idsA.reserve(a.size());
-	for (Creature* spectator : a) {
-		idsA.push_back(spectator->getID());
-	}
-	std::sort(idsA.begin(), idsA.end());
-
-	std::vector<uint32_t> idsB;
-	idsB.reserve(b.size());
-	for (Creature* spectator : b) {
-		idsB.push_back(spectator->getID());
-	}
-	std::sort(idsB.begin(), idsB.end());
-
-	return idsA == idsB;
 }
 }
 
@@ -456,19 +430,7 @@ void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, boo
 	minRangeY = (minRangeY == 0 ? -maxViewportY : -minRangeY);
 	maxRangeY = (maxRangeY == 0 ? maxViewportY : maxRangeY);
 
-	SpectatorCacheMetrics& metrics = g_spectatorCacheMetrics;
-	const bool metricsEnabled = metrics.enabled();
-	const bool cacheableShape = (minRangeX == -maxViewportX && maxRangeX == maxViewportX &&
-	                             minRangeY == -maxViewportY && maxRangeY == maxViewportY && multifloor);
-	// Shadow validation replays the real scan on cache hits and compares.
-	// Only meaningful when the served result is exactly the cache content.
-	const bool shadowCheck = metricsEnabled && metrics.shadowValidation() &&
-	                         cacheableShape && spectators.empty();
-	if (metricsEnabled) {
-		metrics.countCall(cacheableShape);
-	}
-
-	if (cacheableShape) {
+	if (minRangeX == -maxViewportX && maxRangeX == maxViewportX && minRangeY == -maxViewportY && maxRangeY == maxViewportY && multifloor) {
 		if (onlyPlayers) {
 			auto it = playersSpectatorCache.find(centerPos);
 			if (it != playersSpectatorCache.end()) {
@@ -508,10 +470,6 @@ void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, boo
 		}
 	}
 
-	if (metricsEnabled && foundCache) {
-		metrics.countHit();
-	}
-
 	if (!foundCache) {
 		int32_t minRangeZ;
 		int32_t maxRangeZ;
@@ -523,16 +481,7 @@ void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, boo
 			maxRangeZ = centerPos.z;
 		}
 
-		const auto scanStart = metricsEnabled
-			? std::chrono::steady_clock::now()
-			: std::chrono::steady_clock::time_point{};
 		getSpectatorsInternal(spectators, centerPos, minRangeX, maxRangeX, minRangeY, maxRangeY, minRangeZ, maxRangeZ, onlyPlayers);
-		if (metricsEnabled) {
-			metrics.countMiss();
-			metrics.addScanTimeNs(static_cast<uint64_t>(
-				std::chrono::duration_cast<std::chrono::nanoseconds>(
-					std::chrono::steady_clock::now() - scanStart).count()));
-		}
 
 		if (cacheResult) {
 			// Safety valve: entries now outlive individual moves, so bound
@@ -550,52 +499,24 @@ void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, boo
 				spectatorCache[centerPos] = spectators;
 			}
 		}
-
-		if (metricsEnabled) {
-			metrics.noteCacheSize(spectatorCache.size() + playersSpectatorCache.size());
-		}
-	} else if (shadowCheck) {
-		SpectatorVec groundTruth;
-		int32_t minRangeZ;
-		int32_t maxRangeZ;
-		spectatorMultifloorZRange(centerPos.z, minRangeZ, maxRangeZ);
-		getSpectatorsInternal(groundTruth, centerPos, minRangeX, maxRangeX, minRangeY, maxRangeY, minRangeZ, maxRangeZ, onlyPlayers);
-
-		metrics.countShadowCheck();
-		if (!spectatorSetsEqual(spectators, groundTruth)) {
-			metrics.countShadowMismatch(centerPos);
-		}
-	}
-
-	if (metricsEnabled) {
-		metrics.maybeEmit();
 	}
 }
 
 void Map::clearSpectatorCache()
 {
-	g_spectatorCacheMetrics.countInvalidation(spectatorCache.size(), 0);
 	spectatorCache.clear();
 }
 
 void Map::clearPlayersSpectatorCache()
 {
-	g_spectatorCacheMetrics.countInvalidation(playersSpectatorCache.size(), 0);
 	playersSpectatorCache.clear();
 }
 
 void Map::onCreatureChanged(const Position& pos, bool isPlayer)
 {
-	if (g_spectatorCacheMetrics.regionalInvalidation()) {
-		invalidateSpectatorCache(pos);
-		if (isPlayer) {
-			invalidatePlayersSpectatorCache(pos);
-		}
-	} else {
-		clearSpectatorCache();
-		if (isPlayer) {
-			clearPlayersSpectatorCache();
-		}
+	invalidateSpectatorCache(pos);
+	if (isPlayer) {
+		invalidatePlayersSpectatorCache(pos);
 	}
 }
 
@@ -634,7 +555,6 @@ bool spectatorViewportCovers(const Position& center, const Position& tile)
 
 void Map::invalidateSpectatorCache(const Position& changedTile)
 {
-	const size_t before = spectatorCache.size();
 	for (auto it = spectatorCache.begin(); it != spectatorCache.end();) {
 		if (spectatorViewportCovers(it->first, changedTile)) {
 			it = spectatorCache.erase(it);
@@ -642,12 +562,10 @@ void Map::invalidateSpectatorCache(const Position& changedTile)
 			++it;
 		}
 	}
-	g_spectatorCacheMetrics.countInvalidation(before - spectatorCache.size(), spectatorCache.size());
 }
 
 void Map::invalidatePlayersSpectatorCache(const Position& changedTile)
 {
-	const size_t before = playersSpectatorCache.size();
 	for (auto it = playersSpectatorCache.begin(); it != playersSpectatorCache.end();) {
 		if (spectatorViewportCovers(it->first, changedTile)) {
 			it = playersSpectatorCache.erase(it);
@@ -655,7 +573,6 @@ void Map::invalidatePlayersSpectatorCache(const Position& changedTile)
 			++it;
 		}
 	}
-	g_spectatorCacheMetrics.countInvalidation(before - playersSpectatorCache.size(), playersSpectatorCache.size());
 }
 
 bool Map::canThrowObjectTo(const Position& fromPos, const Position& toPos, bool checkLineOfSight /*= true*/, bool sameFloor /*= false*/,
