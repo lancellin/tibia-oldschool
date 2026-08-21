@@ -234,6 +234,13 @@ class Map
 
 		void clearSpectatorCache();
 		void clearPlayersSpectatorCache();
+		// Regional invalidation: drops only the cached entries whose stored
+		// viewport covers the tile where a creature entered or left.
+		void invalidateSpectatorCache(const Position& changedTile);
+		void invalidatePlayersSpectatorCache(const Position& changedTile);
+		// Single entry point for creature enter/leave on a tile; picks the
+		// invalidation mode (regional vs legacy global clear) from config.
+		void onCreatureChanged(const Position& pos, bool isPlayer);
 
 		/**
 		  * Checks if you can throw an object to that position

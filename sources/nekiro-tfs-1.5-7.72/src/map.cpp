@@ -25,8 +25,54 @@
 #include "creature.h"
 #include "game.h"
 #include "monster.h"
+#include "spectatorcachemetrics.h"
+
+#include <chrono>
 
 extern Game g_game;
+
+namespace {
+void spectatorMultifloorZRange(int32_t centerZ, int32_t& minRangeZ, int32_t& maxRangeZ)
+{
+	if (centerZ > 7) {
+		//underground (8->15)
+		minRangeZ = std::max<int32_t>(centerZ - 2, 0);
+		maxRangeZ = std::min<int32_t>(centerZ + 2, MAP_MAX_LAYERS - 1);
+	} else if (centerZ == 6) {
+		minRangeZ = 0;
+		maxRangeZ = 8;
+	} else if (centerZ == 7) {
+		minRangeZ = 0;
+		maxRangeZ = 9;
+	} else {
+		minRangeZ = 0;
+		maxRangeZ = 7;
+	}
+}
+
+bool spectatorSetsEqual(const SpectatorVec& a, const SpectatorVec& b)
+{
+	if (a.size() != b.size()) {
+		return false;
+	}
+
+	std::vector<uint32_t> idsA;
+	idsA.reserve(a.size());
+	for (Creature* spectator : a) {
+		idsA.push_back(spectator->getID());
+	}
+	std::sort(idsA.begin(), idsA.end());
+
+	std::vector<uint32_t> idsB;
+	idsB.reserve(b.size());
+	for (Creature* spectator : b) {
+		idsB.push_back(spectator->getID());
+	}
+	std::sort(idsB.begin(), idsB.end());
+
+	return idsA == idsB;
+}
+}
 
 bool Map::loadMap(const std::string& identifier, bool loadHouses)
 {
@@ -410,7 +456,19 @@ void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, boo
 	minRangeY = (minRangeY == 0 ? -maxViewportY : -minRangeY);
 	maxRangeY = (maxRangeY == 0 ? maxViewportY : maxRangeY);
 
-	if (minRangeX == -maxViewportX && maxRangeX == maxViewportX && minRangeY == -maxViewportY && maxRangeY == maxViewportY && multifloor) {
+	SpectatorCacheMetrics& metrics = g_spectatorCacheMetrics;
+	const bool metricsEnabled = metrics.enabled();
+	const bool cacheableShape = (minRangeX == -maxViewportX && maxRangeX == maxViewportX &&
+	                             minRangeY == -maxViewportY && maxRangeY == maxViewportY && multifloor);
+	// Shadow validation replays the real scan on cache hits and compares.
+	// Only meaningful when the served result is exactly the cache content.
+	const bool shadowCheck = metricsEnabled && metrics.shadowValidation() &&
+	                         cacheableShape && spectators.empty();
+	if (metricsEnabled) {
+		metrics.countCall(cacheableShape);
+	}
+
+	if (cacheableShape) {
 		if (onlyPlayers) {
 			auto it = playersSpectatorCache.find(centerPos);
 			if (it != playersSpectatorCache.end()) {
@@ -450,50 +508,154 @@ void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, boo
 		}
 	}
 
+	if (metricsEnabled && foundCache) {
+		metrics.countHit();
+	}
+
 	if (!foundCache) {
 		int32_t minRangeZ;
 		int32_t maxRangeZ;
 
 		if (multifloor) {
-			if (centerPos.z > 7) {
-				//underground (8->15)
-				minRangeZ = std::max<int32_t>(centerPos.getZ() - 2, 0);
-				maxRangeZ = std::min<int32_t>(centerPos.getZ() + 2, MAP_MAX_LAYERS - 1);
-			} else if (centerPos.z == 6) {
-				minRangeZ = 0;
-				maxRangeZ = 8;
-			} else if (centerPos.z == 7) {
-				minRangeZ = 0;
-				maxRangeZ = 9;
-			} else {
-				minRangeZ = 0;
-				maxRangeZ = 7;
-			}
+			spectatorMultifloorZRange(centerPos.z, minRangeZ, maxRangeZ);
 		} else {
 			minRangeZ = centerPos.z;
 			maxRangeZ = centerPos.z;
 		}
 
+		const auto scanStart = metricsEnabled
+			? std::chrono::steady_clock::now()
+			: std::chrono::steady_clock::time_point{};
 		getSpectatorsInternal(spectators, centerPos, minRangeX, maxRangeX, minRangeY, maxRangeY, minRangeZ, maxRangeZ, onlyPlayers);
+		if (metricsEnabled) {
+			metrics.countMiss();
+			metrics.addScanTimeNs(static_cast<uint64_t>(
+				std::chrono::duration_cast<std::chrono::nanoseconds>(
+					std::chrono::steady_clock::now() - scanStart).count()));
+		}
 
 		if (cacheResult) {
+			// Safety valve: entries now outlive individual moves, so bound
+			// the cache size. A full clear here is correctness-safe (it only
+			// forces rescans).
 			if (onlyPlayers) {
+				if (playersSpectatorCache.size() >= 8192) {
+					playersSpectatorCache.clear();
+				}
 				playersSpectatorCache[centerPos] = spectators;
 			} else {
+				if (spectatorCache.size() >= 8192) {
+					spectatorCache.clear();
+				}
 				spectatorCache[centerPos] = spectators;
 			}
 		}
+
+		if (metricsEnabled) {
+			metrics.noteCacheSize(spectatorCache.size() + playersSpectatorCache.size());
+		}
+	} else if (shadowCheck) {
+		SpectatorVec groundTruth;
+		int32_t minRangeZ;
+		int32_t maxRangeZ;
+		spectatorMultifloorZRange(centerPos.z, minRangeZ, maxRangeZ);
+		getSpectatorsInternal(groundTruth, centerPos, minRangeX, maxRangeX, minRangeY, maxRangeY, minRangeZ, maxRangeZ, onlyPlayers);
+
+		metrics.countShadowCheck();
+		if (!spectatorSetsEqual(spectators, groundTruth)) {
+			metrics.countShadowMismatch(centerPos);
+		}
+	}
+
+	if (metricsEnabled) {
+		metrics.maybeEmit();
 	}
 }
 
 void Map::clearSpectatorCache()
 {
+	g_spectatorCacheMetrics.countInvalidation(spectatorCache.size(), 0);
 	spectatorCache.clear();
 }
 
 void Map::clearPlayersSpectatorCache()
 {
+	g_spectatorCacheMetrics.countInvalidation(playersSpectatorCache.size(), 0);
 	playersSpectatorCache.clear();
+}
+
+void Map::onCreatureChanged(const Position& pos, bool isPlayer)
+{
+	if (g_spectatorCacheMetrics.regionalInvalidation()) {
+		invalidateSpectatorCache(pos);
+		if (isPlayer) {
+			invalidatePlayersSpectatorCache(pos);
+		}
+	} else {
+		clearSpectatorCache();
+		if (isPlayer) {
+			clearPlayersSpectatorCache();
+		}
+	}
+}
+
+namespace {
+// Mirrors the inclusion test of Map::getSpectatorsInternal for the
+// full-viewport, multifloor queries (the only ones that are cached):
+// returns true when a creature standing on `tile` is a spectator of the
+// cached center position. The viewport shifts by the floor difference
+// (offsetZ), exactly like the scan does.
+bool spectatorViewportCovers(const Position& center, const Position& tile)
+{
+	if (center.z > 7) {
+		if (tile.z < std::max<int32_t>(center.z - 2, 0) ||
+		        tile.z > std::min<int32_t>(center.z + 2, MAP_MAX_LAYERS - 1)) {
+			return false;
+		}
+	} else if (center.z == 6) {
+		if (tile.z > 8) {
+			return false;
+		}
+	} else if (center.z == 7) {
+		if (tile.z > 9) {
+			return false;
+		}
+	} else if (tile.z > 7) {
+		return false;
+	}
+
+	const int32_t offsetZ = static_cast<int32_t>(center.z) - tile.z;
+	const int32_t dx = static_cast<int32_t>(tile.x) - center.x;
+	const int32_t dy = static_cast<int32_t>(tile.y) - center.y;
+	return dx >= -Map::maxViewportX + offsetZ && dx <= Map::maxViewportX + offsetZ &&
+	       dy >= -Map::maxViewportY + offsetZ && dy <= Map::maxViewportY + offsetZ;
+}
+}
+
+void Map::invalidateSpectatorCache(const Position& changedTile)
+{
+	const size_t before = spectatorCache.size();
+	for (auto it = spectatorCache.begin(); it != spectatorCache.end();) {
+		if (spectatorViewportCovers(it->first, changedTile)) {
+			it = spectatorCache.erase(it);
+		} else {
+			++it;
+		}
+	}
+	g_spectatorCacheMetrics.countInvalidation(before - spectatorCache.size(), spectatorCache.size());
+}
+
+void Map::invalidatePlayersSpectatorCache(const Position& changedTile)
+{
+	const size_t before = playersSpectatorCache.size();
+	for (auto it = playersSpectatorCache.begin(); it != playersSpectatorCache.end();) {
+		if (spectatorViewportCovers(it->first, changedTile)) {
+			it = playersSpectatorCache.erase(it);
+		} else {
+			++it;
+		}
+	}
+	g_spectatorCacheMetrics.countInvalidation(before - playersSpectatorCache.size(), playersSpectatorCache.size());
 }
 
 bool Map::canThrowObjectTo(const Position& fromPos, const Position& toPos, bool checkLineOfSight /*= true*/, bool sameFloor /*= false*/,

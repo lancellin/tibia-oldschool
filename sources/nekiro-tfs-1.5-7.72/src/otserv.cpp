@@ -26,6 +26,7 @@
 #include "iomarket.h"
 
 #include "configmanager.h"
+#include "spectatorcachemetrics.h"
 #include "scriptmanager.h"
 #include "rsa.h"
 #include "camforensics.h"
@@ -117,15 +118,15 @@ int main(int argc, char* argv[])
 
 void printServerVersion()
 {
-#if defined(GIT_RETRIEVED_STATE) && GIT_RETRIEVED_STATE
-	std::cout << STATUS_SERVER_NAME << " - Version " << GIT_DESCRIBE << std::endl;
-	std::cout << "Git SHA1 " << GIT_SHORT_SHA1  << " dated " << GIT_COMMIT_DATE_ISO8601 << std::endl;
-	#if GIT_IS_DIRTY
-	std::cout << "*** DIRTY - NOT OFFICIAL RELEASE ***" << std::endl;
-	#endif
-#else
-	std::cout << STATUS_SERVER_NAME << " - Version " << STATUS_SERVER_VERSION << std::endl;
-#endif
+#include "git_version.h"
+	const char* suffix = SERVER_GIT_DIRTY ? "z" : "";
+	std::cout << "=========================================" << std::endl;
+	std::cout << "  tibia-oldschool " << SERVER_GIT_TAG << suffix
+	          << "  [git " << SERVER_GIT_SHA << "]" << std::endl;
+	if (SERVER_GIT_DIRTY) {
+		std::cout << "  *** BUILD DE TESTE - mudancas nao commitadas ***" << std::endl;
+	}
+	std::cout << "=========================================" << std::endl;
 	std::cout << std::endl;
 
 	std::cout << "Compiled with " << BOOST_COMPILER << std::endl;
@@ -186,6 +187,7 @@ void mainLoader(int, char*[], ServiceManager* services)
 		startupErrorMessage("Unable to load " + configFile + "!");
 		return;
 	}
+	g_spectatorCacheMetrics.loadConfig();
 
 #ifdef _WIN32
 	const std::string& defaultPriority = g_config.getString(ConfigManager::DEFAULT_PRIORITY);

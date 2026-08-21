@@ -8,6 +8,19 @@ project(tfs)
 add_subdirectory(src)
 add_executable(tfs ${tfs_SRC})
 
+# Refresh git_version.h on every build so the running server can report
+# its tag/commit and whether it carries uncommitted ("z") changes.
+find_package(Git QUIET)
+add_custom_target(git_version_header ALL
+	COMMAND ${CMAKE_COMMAND}
+		-DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+		-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+		-DOUT_HEADER=${CMAKE_CURRENT_BINARY_DIR}/git_version.h
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_git_version.cmake
+	BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/git_version.h)
+add_dependencies(tfs git_version_header)
+target_include_directories(tfs PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 set_target_properties(tfs PROPERTIES CXX_STANDARD 17)
