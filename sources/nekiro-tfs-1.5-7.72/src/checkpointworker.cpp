@@ -120,9 +120,12 @@ AbortedCheckpointWork CheckpointWorker::abortAllPending()
 	}
 	// If the thread died while executing a job, that job's transaction was
 	// rolled back when its connection was closed, so its reservation must also
-	// be released. inFlight is reset because no job is executing anymore.
+	// be released. The job itself is reclaimed so deferred logout saves can be
+	// replayed and checkpoint groups retried. inFlight is reset because no job
+	// is executing anymore.
 	aborted.inFlightPlayerGuids = std::move(inFlightPlayerGuids);
 	inFlightPlayerGuids.clear();
+	aborted.inFlightJob = std::move(currentJob);
 	inFlight = 0;
 	return aborted;
 }
@@ -170,7 +173,6 @@ void CheckpointWorker::threadMain()
 		while (true) {
 			heartbeat();
 
-			std::unique_ptr<CheckpointJob> job;
 			{
 				std::unique_lock<std::mutex> lock(mutex);
 				jobSignal.wait(lock, [this] { return stopping.load(std::memory_order_relaxed) || !jobs.empty(); });
@@ -180,19 +182,19 @@ void CheckpointWorker::threadMain()
 					}
 					continue;
 				}
-				job = std::move(jobs.front());
+				currentJob = std::move(jobs.front());
 				jobs.pop_front();
 				++inFlight;
-				inFlightPlayerGuids = job->playerGuids;
+				inFlightPlayerGuids = currentJob->playerGuids;
 			}
 
 			CheckpointResult result;
-			result.job = std::move(job);
-			executeJob(*result.job, result);
+			executeJob(*currentJob, result);
 			heartbeat();
 
 			{
 				std::lock_guard<std::mutex> lock(mutex);
+				result.job = std::move(currentJob);
 				--inFlight;
 				inFlightPlayerGuids.clear();
 				results.push_back(std::move(result));
@@ -266,7 +268,8 @@ void CheckpointWorker::executeJob(const CheckpointJob& job, CheckpointResult& re
 			}
 		}
 	}
-	if (ok && !db.executeQuery(job.markerStatement)) {
+	// Deferred logout saves carry no floor checkpoint marker.
+	if (ok && !job.markerStatement.empty() && !db.executeQuery(job.markerStatement)) {
 		result.error = "could not register the coordinated checkpoint commit";
 		ok = false;
 	}

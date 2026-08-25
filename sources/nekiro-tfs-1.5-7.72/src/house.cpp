@@ -403,6 +403,11 @@ bool House::executeTransfer(HouseTransferItem* item, Player* newOwner)
 
 void AccessList::parseList(const std::string& list)
 {
+	// Cap on the number of player-name resolutions per parse: each offline
+	// name runs a synchronous DB query on the Dispatcher, so a client-saving
+	// a big list must not be able to queue an unbounded amount of work.
+	static constexpr uint16_t MAX_RESOLVED_PLAYERS = 40;
+
 	playerList.clear();
 	guildRankList.clear();
 	allowEveryone = false;
@@ -415,6 +420,7 @@ void AccessList::parseList(const std::string& list)
 	std::string line;
 
 	uint16_t lineNo = 1;
+	uint16_t resolvedPlayers = 0;
 	while (getline(listStream, line)) {
 		if (++lineNo > 100) {
 			break;
@@ -431,18 +437,21 @@ void AccessList::parseList(const std::string& list)
 
 		toLowerCaseString(line);
 
-		std::string::size_type at_pos = line.find("@");
-		if (at_pos != std::string::npos) {
-			if (at_pos == 0) {
-				addGuild(line.substr(1));
-			} else {
-				addGuildRank(line.substr(0, at_pos - 1), line.substr(at_pos + 1));
-			}
+		if (line.find('@') != std::string::npos) {
+			// Guild entries are no longer supported. Resolving them ran up to
+			// three synchronous DB queries per line on the Dispatcher and
+			// leaked the loaded Guild object (it was never registered in
+			// g_game nor freed). Legacy lists keep their raw text but the
+			// lines grant no access.
+			continue;
 		} else if (line == "*") {
 			allowEveryone = true;
 		} else if (line.find("!") != std::string::npos || line.find("*") != std::string::npos || line.find("?") != std::string::npos) {
 			continue; // regexp no longer supported
 		} else {
+			if (++resolvedPlayers > MAX_RESOLVED_PLAYERS) {
+				break;
+			}
 			addPlayer(line);
 		}
 	}

@@ -85,18 +85,18 @@ Container::Container(Tile* tile) : Container(ITEM_BROWSEFIELD, 30, false, true)
 
 Container::~Container()
 {
-	/*if (getID() == ITEM_BROWSEFIELD) {
+	if (getID() == ITEM_BROWSEFIELD) {
 		g_game.browseFields.erase(getTile());
 
 		for (Item* item : itemlist) {
 			item->setParent(parent);
 		}
-	} else {*/
+	} else {
 		for (Item* item : itemlist) {
 			item->setParent(nullptr);
 			item->decrementReferenceCounter();
 		}
-	//}
+	}
 }
 
 Item* Container::clone() const

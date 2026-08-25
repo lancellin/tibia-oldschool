@@ -18,7 +18,21 @@ local function getMonthString(m)
 	return os.date("%B", os.time{year = 1970, month = m, day = 1})
 end
 
+-- Each call runs two synchronous DB queries on the Dispatcher; keep it to a
+-- human pace so the command cannot be used as a DB amplification vector.
+local COOLDOWN_SECONDS = 2
+local lastDeathlistUse = {}
+
 function onSay(player, words, param)
+	local guid = player:getGuid()
+	local now = os.time()
+	local lastUse = lastDeathlistUse[guid]
+	if lastUse and now - lastUse < COOLDOWN_SECONDS then
+		player:sendCancelMessage("You are exhausted.")
+		return false
+	end
+	lastDeathlistUse[guid] = now
+
 	local resultId = db.storeQuery("SELECT `id`, `name` FROM `players` WHERE `name` = " .. db.escapeString(param))
 	if resultId ~= false then
 		local targetGUID = result.getNumber(resultId, "id")

@@ -862,8 +862,16 @@ void PlayerShopManager::buy(Player* buyer, const std::vector<std::string>& parts
 	}
 
 	if (PLAYER_SHOP_SAVE_AFTER_BUY) {
-		IOLoginData::savePlayer(buyer);
-		IOLoginData::savePlayer(seller);
+		// Durability without stalling the Dispatcher: a single checkpoint group
+		// is captured here and committed atomically by the checkpoint worker.
+		// movedItem is the post-move destination item (always alive after a
+		// successful move, even when the source merged into an existing stack).
+		if (!g_game.savePlayerShopPurchase(seller, buyer, sellerContainer, movedItem)) {
+			// Checkpoint machinery unavailable or saturated: keep the previous
+			// guarantee with the legacy synchronous saves.
+			IOLoginData::savePlayer(buyer);
+			IOLoginData::savePlayer(seller);
+		}
 	}
 
 	debugLog("buy buyer=" + buyer->getName() + " seller=" + seller->getName() +

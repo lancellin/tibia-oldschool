@@ -25,7 +25,6 @@
 #include "creature.h"
 #include "tasks.h"
 
-#include <mutex>
 #include <unordered_set>
 
 class NetworkMessage;
@@ -98,7 +97,6 @@ class ProtocolGame final : public Protocol
 		void disconnectClient(const std::string& message) const;
 		void writeToOutputBuffer(const NetworkMessage& msg);
 		OutputMessage_ptr appendToOutputBuffer(const NetworkMessage& msg);
-		void initializeCamTranscriptContext(OperatingSystem_t operatingSystem);
 
 		void release() override;
 
@@ -112,7 +110,6 @@ class ProtocolGame final : public Protocol
 		void parsePacket(NetworkMessage& msg) override;
 		void onRecvFirstMessage(NetworkMessage& msg) override;
 		void onConnect() override;
-		void onSendMessage(const OutputMessage_ptr& msg) const override;
 
 		//Parse methods
 		void parseAutoWalk(NetworkMessage& msg);
@@ -305,27 +302,16 @@ class ProtocolGame final : public Protocol
 		//messages
 		void sendModalWindow(const ModalWindow& modalWindow);
 
-		//Help functions
-		using CamForensicEntries = std::vector<std::string>;
-
-		void appendCamForensicEntry(CamForensicEntries& entries, const Item* item, char domain,
-		                            uint32_t locationA, uint32_t locationB = 0,
-		                            uint32_t locationC = 0, uint32_t locationD = 0) const;
-		void sendCamForensicEntries(const CamForensicEntries& entries);
-
 		// translate a tile to client-readable format
-		void GetTileDescription(const Tile* tile, NetworkMessage& msg,
-		                        CamForensicEntries* camForensicEntries = nullptr);
+		void GetTileDescription(const Tile* tile, NetworkMessage& msg);
 
 		// translate a floor to client-readable format
 		void GetFloorDescription(NetworkMessage& msg, int32_t x, int32_t y, int32_t z,
-		                         int32_t width, int32_t height, int32_t offset, int32_t& skip,
-		                         CamForensicEntries* camForensicEntries = nullptr);
+		                         int32_t width, int32_t height, int32_t offset, int32_t& skip);
 
 		// translate a map area to client-readable format
 		void GetMapDescription(int32_t x, int32_t y, int32_t z,
-		                       int32_t width, int32_t height, NetworkMessage& msg,
-		                       CamForensicEntries* camForensicEntries = nullptr);
+		                       int32_t width, int32_t height, NetworkMessage& msg);
 
 		void AddCreature(NetworkMessage& msg, const Creature* creature, bool known, uint32_t remove);
 		void AddPlayerStats(NetworkMessage& msg);
@@ -339,33 +325,15 @@ class ProtocolGame final : public Protocol
 		static void RemoveTileCreature(NetworkMessage& msg, const Creature* creature, const Position& pos, uint32_t stackpos);
 
 		void MoveUpCreature(NetworkMessage& msg, const Creature* creature, const Position& newPos,
-		                    const Position& oldPos, CamForensicEntries* camForensicEntries = nullptr);
+		                    const Position& oldPos);
 		void MoveDownCreature(NetworkMessage& msg, const Creature* creature, const Position& newPos,
-		                      const Position& oldPos, CamForensicEntries* camForensicEntries = nullptr);
+		                      const Position& oldPos);
 
 		//shop
 		void AddShopItem(NetworkMessage& msg, const ShopInfo& item);
 
 		//otclient
 		void parseExtendedOpcode(NetworkMessage& msg);
-
-		uint64_t camForensicSequence = 0;
-		std::string camForensicConnectionId;
-		std::string camForensicPreviousSignature = "-";
-
-		mutable std::mutex camTranscriptMutex;
-		mutable std::unordered_set<const OutputMessage*> camForensicOutputBuffers;
-		mutable bool camTranscriptStarted = false;
-		bool camTranscriptEnabled = false;
-		mutable uint64_t camTranscriptSequence = 0;
-		mutable std::string camTranscriptDigest = "-";
-		mutable std::string camTranscriptPreviousSignature = "-";
-		std::string camTranscriptConnectionId;
-		uint32_t camTranscriptWorld = 0;
-		uint32_t camTranscriptGeneration = 0;
-		uint64_t camTranscriptSession = 0;
-		uint32_t camTranscriptPlayerGuid = 0;
-		std::string camTranscriptPlayerName;
 
 		friend class Player;
 
@@ -394,6 +362,9 @@ class ProtocolGame final : public Protocol
 		int64_t nextCharmActionRequest = 0;
 		int64_t nextWalkRequest = 0;
 		int64_t nextAttackTargetRequest = 0;
+		int64_t nextOpenPrivateChannelRequest = 0;
+		int64_t nextAddVipRequest = 0;
+		int64_t nextEditVipRequest = 0;
 		uint32_t pendingAttackCreatureId = 0;
 		uint32_t pendingAttackTargetEvent = 0;
 

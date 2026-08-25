@@ -59,6 +59,30 @@ void ConnectionManager::closeAll()
 	connections.clear();
 }
 
+void ConnectionManager::addOutputQueueBytes(uint64_t bytes)
+{
+	const uint64_t total = queuedOutputBytes.fetch_add(bytes, std::memory_order_relaxed) + bytes;
+	uint64_t peak = peakQueuedOutputBytes.load(std::memory_order_relaxed);
+	while (total > peak &&
+	       !peakQueuedOutputBytes.compare_exchange_weak(peak, total, std::memory_order_relaxed)) {
+	}
+}
+
+void ConnectionManager::removeOutputQueueBytes(uint64_t bytes)
+{
+	// Clamp at zero: any accounting drift must never wrap the counter into a
+	// huge value (which would read as an enormous queue depth).
+	uint64_t current = queuedOutputBytes.load(std::memory_order_relaxed);
+	while (!queuedOutputBytes.compare_exchange_weak(
+		current, current >= bytes ? current - bytes : 0, std::memory_order_relaxed)) {
+	}
+}
+
+void ConnectionManager::recordOutputQueueOverflowDisconnect()
+{
+	outputQueueOverflowDisconnects.fetch_add(1, std::memory_order_relaxed);
+}
+
 // Connection
 
 void Connection::close(bool force)
@@ -245,7 +269,29 @@ void Connection::send(const OutputMessage_ptr& msg)
 	}
 
 	bool noPendingWrite = messageQueue.empty();
-	messageQueue.emplace_back(msg);
+	// Capture the size now: onSendMessage() grows the frame during encryption,
+	// and the pop path must subtract exactly what was accounted here.
+	const uint64_t msgBytes = msg->getLength();
+	messageQueue.emplace_back(QueuedOutputMessage{msg, msgBytes});
+	messageQueueBytes += msgBytes;
+	ConnectionManager::getInstance().addOutputQueueBytes(msgBytes);
+
+	// Backpressure (A11): a peer that reads too slowly to drain its queue —
+	// but not slowly enough to trip the write timeout — would grow RAM without
+	// bound. Force-close instead of queueing past the cap. The queued messages
+	// are freed by onWriteOperation once the in-flight write fails; they must
+	// not be cleared here because the in-flight async_write still references
+	// the front message's buffer.
+	if (messageQueue.size() > CONNECTION_OUTPUT_QUEUE_MAX_MESSAGES ||
+	    messageQueueBytes > CONNECTION_OUTPUT_QUEUE_MAX_BYTES) {
+		std::cout << "[Network - Connection::send] output queue overflow: "
+		          << messageQueue.size() << " message(s), " << messageQueueBytes
+		          << " byte(s) queued; force-closing slow peer." << std::endl;
+		ConnectionManager::getInstance().recordOutputQueueOverflowDisconnect();
+		close(FORCE_CLOSE);
+		return;
+	}
+
 	if (noPendingWrite) {
 		internalSend(msg);
 	}
@@ -286,16 +332,27 @@ void Connection::onWriteOperation(const boost::system::error_code& error)
 {
 	std::lock_guard<std::recursive_mutex> lockClass(connectionLock);
 	writeTimer.cancel();
-	messageQueue.pop_front();
+	if (!messageQueue.empty()) {
+		const uint64_t sentBytes = messageQueue.front().bytes;
+		// Clamp instead of wrapping: a negative counter would read as a huge
+		// uint64 and force-close every subsequent send.
+		messageQueueBytes = messageQueueBytes >= sentBytes ? messageQueueBytes - sentBytes : 0;
+		ConnectionManager::getInstance().removeOutputQueueBytes(sentBytes);
+		messageQueue.pop_front();
+	}
 
 	if (error) {
+		for (const QueuedOutputMessage& queued : messageQueue) {
+			ConnectionManager::getInstance().removeOutputQueueBytes(queued.bytes);
+		}
+		messageQueueBytes = 0;
 		messageQueue.clear();
 		close(FORCE_CLOSE);
 		return;
 	}
 
 	if (!messageQueue.empty()) {
-		internalSend(messageQueue.front());
+		internalSend(messageQueue.front().message);
 	} else if (closed) {
 		closeSocket();
 	}

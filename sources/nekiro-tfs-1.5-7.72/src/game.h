@@ -42,6 +42,8 @@ class Creature;
 class Monster;
 class Npc;
 class CombatInfo;
+struct CheckpointJob;
+struct CheckpointResult;
 
 struct BestiaryMonsterEntry {
 	uint16_t creatureId = 0;
@@ -635,6 +637,12 @@ class Game
 		// Detects an unexpectedly dead checkpoint worker thread and releases any
 		// reservations/groups it left behind, so nothing stays stuck forever.
 		void recoverDeadCheckpointWorker();
+		// Captures the player's logout save as immutable SQL on the Dispatcher
+		// and queues it on the checkpoint worker behind every in-flight floor
+		// checkpoint, so the newer state commits in order without blocking the
+		// Dispatcher. Takes ownership of the legacy reservation on success;
+		// relogin stays blocked until the deferred save settles.
+		bool enqueueDeferredPlayerSave(Player* player, uint32_t legacyReservationId);
 		bool beginFloorPersistenceCleanSave(bool resetFloorSnapshots = false);
 		bool activateEmergency(uint32_t activatorGuid, const std::string& activatorName);
 		bool finishEmergency(uint32_t finisherGuid, const std::string& finisherName);
@@ -650,6 +658,9 @@ class Game
 		}
 		bool isFloorCleanSaveWindowActive() const {
 			return floorCleanSaveWindowActive;
+		}
+		bool isFloorCleanSaveInProgress() const {
+			return floorCleanSaveInProgress;
 		}
 		FloorSnapshotDatabaseStats getFloorSnapshotDatabaseStats() const;
 		FloorSnapshotVerification verifyFloorSnapshot(const Position& position) const;
@@ -798,6 +809,13 @@ class Game
 
 		bool internalStartTrade(Player* player, Player* tradePartner, Item* tradeItem);
 		void internalCloseTrade(Player* player, bool sendCancel = true);
+		// Persists a PlayerShop purchase without blocking the Dispatcher: both
+		// participants are merged into one checkpoint group whose save the
+		// checkpoint worker commits in a single transaction (same atomic
+		// durability pattern as playerAcceptTrade). Returns false when the
+		// checkpoint machinery is unavailable or the job could not be
+		// enqueued; the caller then falls back to the legacy synchronous saves.
+		bool savePlayerShopPurchase(Player* seller, Player* buyer, Cylinder* sellerContainer, Item* soldItem);
 		bool playerBroadcastMessage(Player* player, const std::string& text) const;
 		void broadcastMessage(const std::string& text, MessageClasses type) const;
 
@@ -1051,6 +1069,15 @@ class Game
 		bool enqueueFloorCheckpointGroup(uint64_t groupId);
 		// Applies completed worker results (Dispatcher-side bookkeeping).
 		void processCheckpointResults();
+		// Settles a deferred logout save result: releases the legacy
+		// reservation, retries the immutable statements a bounded number of
+		// times and logs a loud error when every attempt failed.
+		void completeDeferredPlayerSave(CheckpointResult& result);
+		// Replays a deferred logout save synchronously on the Dispatcher after
+		// the checkpoint worker died with the job still queued. Ordering stays
+		// safe because the dead worker's connection rollback already discarded
+		// any older in-flight checkpoint.
+		void replayDeferredPlayerSave(std::unique_ptr<CheckpointJob> job);
 		// Central failure bookkeeping + alerting for checkpoint groups. Keeps
 		// the existing retry/backoff behavior unchanged.
 		void failFloorCheckpointGroup(FloorCheckpointGroup* group, const std::string& error,
@@ -1140,6 +1167,10 @@ class Game
 		// in-flight background checkpoint job. Used to keep asynchronous logout
 		// from racing an in-flight checkpoint save for the same player.
 		std::unordered_map<uint32_t, uint32_t> floorCheckpointInFlightPlayers;
+		// GUIDs with a deferred logout save queued on the checkpoint worker.
+		// Guards against double deferral and makes outstanding saves visible
+		// during shutdown/diagnostics.
+		std::set<uint32_t> deferredPlayerSaves;
 		uint64_t floorDirtySequence = 0;
 		uint64_t floorSnapshotVersionClock = 0;
 		uint64_t floorCheckpointGroupClock = 0;

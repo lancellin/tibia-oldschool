@@ -38,7 +38,6 @@
 #include "scheduler.h"
 #include "tools.h"
 #include "playershop.h"
-#include "camforensics.h"
 
 #include <fmt/format.h>
 
@@ -51,16 +50,6 @@ namespace {
 
 constexpr uint8_t CONTAINER_RESTORE_EXTENDED_OPCODE = 8;
 constexpr uint8_t PROFESSIONS_EXTENDED_OPCODE = 11;
-constexpr uint8_t CAM_FORENSIC_EXTENDED_OPCODE = 203;
-constexpr uint8_t CAM_TRANSCRIPT_EXTENDED_OPCODE = 204;
-constexpr size_t CAM_FORENSIC_MAX_ENTRIES_PER_BATCH = 32;
-// NetworkMessage::addString rejects strings larger than 8192 bytes.  Keep the
-// signed evidence payload comfortably below that hard wire limit: the evidence
-// header and signature are appended after the individual entries are batched.
-constexpr size_t CAM_FORENSIC_MAX_WIRE_STRING_SIZE = 8192;
-constexpr size_t CAM_FORENSIC_MAX_PAYLOAD_SIZE = 7000;
-constexpr size_t CAM_FORENSIC_MAX_DESCRIPTION_SIZE = 4096;
-constexpr size_t CAM_TRANSCRIPT_SEAL_RESERVE = 768;
 
 using WaitList = std::deque<std::pair<int64_t, uint32_t>>; // (timeout, player guid)
 
@@ -101,23 +90,6 @@ int64_t getTimeout(std::size_t slot)
 {
 	// timeout is set to 15 seconds longer than expected retry attempt
 	return getWaitTime(slot) + 15;
-}
-
-std::string generateCamForensicConnectionId()
-{
-	static std::uniform_int_distribution<uint32_t> distribution;
-	std::ostringstream stream;
-	stream << std::hex << std::setfill('0');
-	for (uint8_t index = 0; index < 4; ++index) {
-		stream << std::setw(8) << distribution(getRandomGenerator());
-	}
-	return stream.str();
-}
-
-uint64_t getSystemTimeMilliseconds()
-{
-	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-		std::chrono::system_clock::now().time_since_epoch()).count());
 }
 
 void cleanupList(WaitList& list)
@@ -425,6 +397,23 @@ bool loadBestiaryEntry(const Player& player, uint16_t creatureId, BestiaryClient
 void ProtocolGame::release()
 {
 	//dispatcher thread
+
+	// Lifecycle race guard (A10): parsePacket dereferences `player` on the
+	// network io thread while this function destroys the Player here on the
+	// Dispatcher. Connection::close() sets closed=true under connectionLock
+	// BEFORE posting this release task, and every parse entry point bails out
+	// on closed under that same lock — so once we have held connectionLock
+	// once, no parse can still be running or ever start again for this
+	// connection, and every `player` access below is race-free.
+	//
+	// SAFETY INVARIANT: this barrier is only cheap because parse handlers
+	// never block waiting for the Dispatcher (they only enqueue tasks). If a
+	// future parse path ever waits synchronously on the Dispatcher while
+	// holding connectionLock, this lock acquisition deadlocks the Dispatcher.
+	if (auto connection = getConnection()) {
+		std::lock_guard<std::recursive_mutex> parseDrainBarrier(connection->getConnectionLock());
+	}
+
 	if (pendingAttackTargetEvent != 0) {
 		g_scheduler.stopEvent(pendingAttackTargetEvent);
 		pendingAttackTargetEvent = 0;
@@ -662,7 +651,6 @@ bool ProtocolGame::finishNewPlayerLogin(uint32_t accountId, OperatingSystem_t op
 
 	DispatcherPhaseMetricsTimer placeTimer(DispatcherMetricsPhase::LOGIN_PLACE_CREATURE);
 	player->setOperatingSystem(operatingSystem);
-	initializeCamTranscriptContext(operatingSystem);
 
 	if (!g_game.placeCreature(player, player->getLoginPosition())) {
 		if (!g_game.placeCreature(player, player->getTemplePosition(), false, true)) {
@@ -712,7 +700,6 @@ void ProtocolGame::connect(uint32_t playerId, OperatingSystem_t operatingSystem)
 	//player->clearModalWindows();
 	player->setOperatingSystem(operatingSystem);
 	player->isConnecting = false;
-	initializeCamTranscriptContext(operatingSystem);
 
 	player->client = getThis();
 	sendAddCreature(player, player->getPosition(), 0, false);
@@ -922,7 +909,7 @@ void ProtocolGame::disconnectClient(const std::string& message) const
 
 OutputMessage_ptr ProtocolGame::appendToOutputBuffer(const NetworkMessage& msg)
 {
-	auto out = getOutputBuffer(msg.getLength() + CAM_TRANSCRIPT_SEAL_RESERVE);
+	auto out = getOutputBuffer(msg.getLength());
 	out->append(msg);
 	return out;
 }
@@ -950,86 +937,6 @@ void ProtocolGame::sendProfessionData()
 	sendExtendedOpcode(PROFESSIONS_EXTENDED_OPCODE,
 		fmt::format("1|alchemy|{:d}|{:d}", player->getAlchemyLevel(),
 			static_cast<uint32_t>(player->getAlchemyPercent())));
-}
-
-void ProtocolGame::initializeCamTranscriptContext(OperatingSystem_t operatingSystem)
-{
-	if (!player || operatingSystem < CLIENTOS_OTCLIENT_LINUX) {
-		return;
-	}
-
-	std::lock_guard<std::mutex> lock(camTranscriptMutex);
-	if (camTranscriptEnabled) {
-		return;
-	}
-
-	camTranscriptEnabled = true;
-	camTranscriptConnectionId = generateCamForensicConnectionId();
-	camTranscriptWorld = g_game.getFloorSnapshotWorldId();
-	camTranscriptGeneration = g_game.getFloorSnapshotGenerationId();
-	camTranscriptSession = g_game.getFloorPersistenceSessionId();
-	camTranscriptPlayerGuid = player->getGUID();
-	camTranscriptPlayerName = player->getName();
-}
-
-void ProtocolGame::onSendMessage(const OutputMessage_ptr& msg) const
-{
-	if (msg) {
-		std::lock_guard<std::mutex> lock(camTranscriptMutex);
-		if (camTranscriptEnabled) {
-			const bool containsEvidence = camForensicOutputBuffers.erase(msg.get()) != 0;
-			const bool startTranscript = !camTranscriptStarted;
-			const size_t packetBodySize = msg->getLength();
-			const std::string nextDigest = CamForensicSigner::sha256TranscriptPacket(
-				camTranscriptDigest, msg->getOutputBuffer(), packetBodySize);
-			camTranscriptDigest = nextDigest;
-
-			if (startTranscript || containsEvidence) {
-				const uint64_t sequence = camTranscriptSequence + 1;
-				std::ostringstream payload;
-				payload << "OTCAM-TRANSCRIPT|1"
-				        << '|' << (startTranscript ? "START" : "EVIDENCE")
-				        << '|' << camTranscriptWorld
-				        << '|' << camTranscriptGeneration
-				        << '|' << camTranscriptSession
-				        << '|' << camTranscriptPlayerGuid
-				        << '|' << getSystemTimeMilliseconds()
-				        << '|' << camTranscriptConnectionId
-				        << '|' << sequence
-				        << '|' << camTranscriptPreviousSignature
-				        << '|' << CamForensicSigner::base64Encode(camTranscriptPlayerName)
-				        << '|' << packetBodySize
-				        << '|' << nextDigest;
-
-				try {
-					const std::string payloadText = payload.str();
-					const std::string signature = g_camForensicSigner.sign(payloadText);
-					NetworkMessage seal;
-					seal.addByte(0x32);
-					seal.addByte(CAM_TRANSCRIPT_EXTENDED_OPCODE);
-					seal.addString(payloadText + "\nSIG|" + signature);
-
-					if (static_cast<size_t>(msg->getLength()) + seal.getLength() >=
-					    NetworkMessage::MAX_BODY_LENGTH) {
-						std::cout << "[CAM forensics] Transcript seal did not fit for "
-						          << camTranscriptPlayerName
-						          << "; affected CAM evidence will fail closed." << std::endl;
-					} else {
-						msg->append(seal);
-						camTranscriptStarted = true;
-						camTranscriptSequence = sequence;
-						camTranscriptPreviousSignature = signature;
-					}
-				} catch (const std::exception& exception) {
-					std::cout << "[CAM forensics] Unable to seal packet transcript for "
-					          << camTranscriptPlayerName << ": " << exception.what()
-					          << ". Affected CAM evidence will fail closed." << std::endl;
-				}
-			}
-		}
-	}
-
-	Protocol::onSendMessage(msg);
 }
 
 void ProtocolGame::parsePacket(NetworkMessage& msg)
@@ -1158,161 +1065,7 @@ void ProtocolGame::parsePacket(NetworkMessage& msg)
 	}
 }
 
-void ProtocolGame::appendCamForensicEntry(CamForensicEntries& entries, const Item* item, char domain,
-                                          uint32_t locationA, uint32_t locationB,
-                                          uint32_t locationC, uint32_t locationD) const
-{
-	if (!item) {
-		return;
-	}
-
-	const std::string instanceId = item->getFloorPersistenceInstanceId();
-	if (instanceId.empty()) {
-		return;
-	}
-
-	const ItemType& itemType = Item::items[item->getID()];
-	uint16_t wireValue = 1;
-	if (itemType.stackable) {
-		wireValue = std::min<uint16_t>(0xFF, item->getItemCount());
-	} else if (itemType.isSplash() || itemType.isFluidContainer()) {
-		wireValue = item->getSubType();
-	}
-
-	std::ostringstream description;
-	description << "You see " << item->getDescription(0)
-	            << "\nFloor instance ID: " << instanceId
-	            << "\nItem ID: " << item->getID();
-
-	const uint16_t actionId = item->getActionId();
-	if (actionId != 0) {
-		description << ", Action ID: " << actionId;
-	}
-
-	const uint16_t uniqueId = item->getUniqueId();
-	if (uniqueId != 0) {
-		description << ", Unique ID: " << uniqueId;
-	}
-
-	if (itemType.transformEquipTo != 0) {
-		description << "\nTransforms to: " << itemType.transformEquipTo << " (onEquip)";
-	} else if (itemType.transformDeEquipTo != 0) {
-		description << "\nTransforms to: " << itemType.transformDeEquipTo << " (onDeEquip)";
-	}
-
-	if (item->getDecayTo() != -1) {
-		description << "\nDecays to: " << item->getDecayTo();
-	}
-
-	switch (domain) {
-		case 'M':
-			description << "\nPosition: " << locationA << ", " << locationB << ", " << locationC
-			            << "\nCAM stack position: " << locationD;
-			break;
-		case 'C':
-			description << "\nCAM container: " << locationA << ", slot: " << locationB;
-			break;
-		case 'I':
-			description << "\nCAM inventory slot: " << locationA;
-			break;
-		default:
-			return;
-	}
-
-	std::string descriptionText = description.str();
-	if (descriptionText.size() > CAM_FORENSIC_MAX_DESCRIPTION_SIZE) {
-		descriptionText.resize(CAM_FORENSIC_MAX_DESCRIPTION_SIZE);
-		descriptionText.append("\n[CAM forensic description truncated by the server]");
-	}
-
-	std::ostringstream entry;
-	entry << domain << '|' << locationA << '|' << locationB << '|' << locationC << '|' << locationD
-	      << '|' << item->getID() << '|' << item->getClientID() << '|' << wireValue
-	      << '|' << CamForensicSigner::base64Encode(instanceId)
-	      << '|' << CamForensicSigner::base64Encode(descriptionText);
-	entries.emplace_back(entry.str());
-}
-
-void ProtocolGame::sendCamForensicEntries(const CamForensicEntries& entries)
-{
-	if (entries.empty() || !player) {
-		return;
-	}
-
-	if (camForensicConnectionId.empty()) {
-		camForensicConnectionId = generateCamForensicConnectionId();
-	}
-
-	size_t first = 0;
-	while (first < entries.size()) {
-		size_t last = first;
-		size_t entryBytes = 0;
-		while (last < entries.size() && (last - first) < CAM_FORENSIC_MAX_ENTRIES_PER_BATCH) {
-			const size_t nextBytes = entryBytes + entries[last].size() + 1;
-			if (last != first && nextBytes > CAM_FORENSIC_MAX_PAYLOAD_SIZE - 512) {
-				break;
-			}
-			entryBytes = nextBytes;
-			++last;
-		}
-
-		const uint64_t sequence = camForensicSequence + 1;
-		std::ostringstream payload;
-		payload << "OTCAM-EVIDENCE|1"
-		        << '|' << g_game.getFloorSnapshotWorldId()
-		        << '|' << g_game.getFloorSnapshotGenerationId()
-		        << '|' << g_game.getFloorPersistenceSessionId()
-		        << '|' << player->getGUID()
-		        << '|' << getSystemTimeMilliseconds()
-		        << '|' << camForensicConnectionId
-		        << '|' << sequence
-		        << '|' << camForensicPreviousSignature
-		        << '|' << CamForensicSigner::base64Encode(player->getName())
-		        << '|' << (last - first);
-		for (size_t index = first; index < last; ++index) {
-			payload << '\n' << entries[index];
-		}
-
-		const std::string payloadText = payload.str();
-		try {
-			const std::string signature = g_camForensicSigner.sign(payloadText);
-			const std::string wirePayload = payloadText + "\nSIG|" + signature;
-			if (wirePayload.size() > CAM_FORENSIC_MAX_WIRE_STRING_SIZE) {
-				std::cout << "[CAM forensics] Evidence payload exceeded the protocol string limit for "
-				          << player->getName() << "; affected CAM evidence will fail closed." << std::endl;
-				return;
-			}
-
-			NetworkMessage evidenceMessage;
-			evidenceMessage.addByte(0x32);
-			evidenceMessage.addByte(CAM_FORENSIC_EXTENDED_OPCODE);
-			evidenceMessage.addString(wirePayload);
-			if (evidenceMessage.getLength() != wirePayload.size() + 4) {
-				std::cout << "[CAM forensics] Unable to serialize evidence payload for "
-				          << player->getName() << "; affected CAM evidence will fail closed." << std::endl;
-				return;
-			}
-			const OutputMessage_ptr output = appendToOutputBuffer(evidenceMessage);
-			{
-				std::lock_guard<std::mutex> lock(camTranscriptMutex);
-				if (camTranscriptEnabled) {
-					camForensicOutputBuffers.emplace(output.get());
-				}
-			}
-			camForensicSequence = sequence;
-			camForensicPreviousSignature = signature;
-		} catch (const std::exception& exception) {
-			std::cout << "[CAM forensics] Unable to sign item evidence for "
-			          << player->getName() << ": " << exception.what() << std::endl;
-			return;
-		}
-
-		first = last;
-	}
-}
-
-void ProtocolGame::GetTileDescription(const Tile* tile, NetworkMessage& msg,
-                                      CamForensicEntries* camForensicEntries)
+void ProtocolGame::GetTileDescription(const Tile* tile, NetworkMessage& msg)
 {
 	//msg.add<uint16_t>(0x00); //environmental effects
 
@@ -1320,12 +1073,6 @@ void ProtocolGame::GetTileDescription(const Tile* tile, NetworkMessage& msg,
 	Item* ground = tile->getGround();
 	if (ground) {
 		msg.addItem(ground);
-		if (camForensicEntries) {
-			const Position& position = tile->getPosition();
-			appendCamForensicEntry(
-				*camForensicEntries, ground, 'M',
-				position.x, position.y, position.z, 0);
-		}
 		count = 1;
 	} else {
 		count = 0;
@@ -1335,12 +1082,6 @@ void ProtocolGame::GetTileDescription(const Tile* tile, NetworkMessage& msg,
 	if (items) {
 		for (auto it = items->getBeginTopItem(), end = items->getEndTopItem(); it != end; ++it) {
 			msg.addItem(*it);
-			if (camForensicEntries) {
-				const Position& position = tile->getPosition();
-				appendCamForensicEntry(
-					*camForensicEntries, *it, 'M',
-					position.x, position.y, position.z, count);
-			}
 
 			if (++count == 10) {
 				break;
@@ -1367,12 +1108,6 @@ void ProtocolGame::GetTileDescription(const Tile* tile, NetworkMessage& msg,
 	if (items && count < 10) {
 		for (auto it = items->getBeginDownItem(), end = items->getEndDownItem(); it != end; ++it) {
 			msg.addItem(*it);
-			if (camForensicEntries) {
-				const Position& position = tile->getPosition();
-				appendCamForensicEntry(
-					*camForensicEntries, *it, 'M',
-					position.x, position.y, position.z, count);
-			}
 
 			if (++count == 10) {
 				return;
@@ -1382,8 +1117,7 @@ void ProtocolGame::GetTileDescription(const Tile* tile, NetworkMessage& msg,
 }
 
 void ProtocolGame::GetMapDescription(int32_t x, int32_t y, int32_t z, int32_t width,
-                                     int32_t height, NetworkMessage& msg,
-                                     CamForensicEntries* camForensicEntries)
+                                     int32_t height, NetworkMessage& msg)
 {
 	int32_t skip = -1;
 	int32_t startz, endz, zstep;
@@ -1399,7 +1133,7 @@ void ProtocolGame::GetMapDescription(int32_t x, int32_t y, int32_t z, int32_t wi
 	}
 
 	for (int32_t nz = startz; nz != endz + zstep; nz += zstep) {
-		GetFloorDescription(msg, x, y, nz, width, height, z - nz, skip, camForensicEntries);
+		GetFloorDescription(msg, x, y, nz, width, height, z - nz, skip);
 	}
 
 	if (skip >= 0) {
@@ -1409,8 +1143,7 @@ void ProtocolGame::GetMapDescription(int32_t x, int32_t y, int32_t z, int32_t wi
 }
 
 void ProtocolGame::GetFloorDescription(NetworkMessage& msg, int32_t x, int32_t y, int32_t z,
-                                       int32_t width, int32_t height, int32_t offset, int32_t& skip,
-                                       CamForensicEntries* camForensicEntries)
+                                       int32_t width, int32_t height, int32_t offset, int32_t& skip)
 {
 	for (int32_t nx = 0; nx < width; nx++) {
 		for (int32_t ny = 0; ny < height; ny++) {
@@ -1422,7 +1155,7 @@ void ProtocolGame::GetFloorDescription(NetworkMessage& msg, int32_t x, int32_t y
 				}
 
 				skip = 0;
-				GetTileDescription(tile, msg, camForensicEntries);
+				GetTileDescription(tile, msg);
 			} else if (skip == 0xFE) {
 				msg.addByte(0xFF);
 				msg.addByte(0xFF);
@@ -1544,7 +1277,14 @@ void ProtocolGame::parseCloseChannel(NetworkMessage& msg)
 
 void ProtocolGame::parseOpenPrivateChannel(NetworkMessage& msg)
 {
+	// The receiver name triggers a synchronous DB lookup (formatPlayerName)
+	// on the Dispatcher; keep it to a human pace.
+	static constexpr uint32_t OPEN_PRIVATE_CHANNEL_RATE_LIMIT_MS = 1000;
+
 	const std::string receiver = msg.getString();
+	if (!checkClientRequestRateLimit(nextOpenPrivateChannelRequest, OPEN_PRIVATE_CHANNEL_RATE_LIMIT_MS)) {
+		return;
+	}
 	addGameTask(&Game::playerOpenPrivateChannel, player->getID(), receiver);
 }
 
@@ -1955,7 +1695,14 @@ void ProtocolGame::parseLookInTrade(NetworkMessage& msg)
 
 void ProtocolGame::parseAddVip(NetworkMessage& msg)
 {
+	// Unknown names trigger a synchronous DB lookup (getGuidByNameEx) on the
+	// Dispatcher; keep additions to a human pace.
+	static constexpr uint32_t ADD_VIP_RATE_LIMIT_MS = 1000;
+
 	const std::string name = msg.getString();
+	if (!checkClientRequestRateLimit(nextAddVipRequest, ADD_VIP_RATE_LIMIT_MS)) {
+		return;
+	}
 	addGameTask(&Game::playerRequestAddVip, player->getID(), name);
 }
 
@@ -1967,10 +1714,20 @@ void ProtocolGame::parseRemoveVip(NetworkMessage& msg)
 
 void ProtocolGame::parseEditVip(NetworkMessage& msg)
 {
+	// Every edit writes a synchronous DB UPDATE carrying the (client-sized)
+	// description; keep edits to a human pace and the text bounded.
+	static constexpr uint32_t EDIT_VIP_RATE_LIMIT_MS = 1000;
+	static constexpr size_t MAX_VIP_DESCRIPTION_LENGTH = 255;
+
 	uint32_t guid = msg.get<uint32_t>();
 	const std::string description = msg.getString();
 	uint32_t icon = std::min<uint32_t>(10, msg.get<uint32_t>()); // 10 is max icon in 9.63
 	bool notify = msg.getByte() != 0;
+
+	if (description.length() > MAX_VIP_DESCRIPTION_LENGTH ||
+	        !checkClientRequestRateLimit(nextEditVipRequest, EDIT_VIP_RATE_LIMIT_MS)) {
+		return;
+	}
 	addGameTask(&Game::playerRequestEditVip, player->getID(), guid, description, icon, notify);
 }
 
@@ -2449,7 +2206,6 @@ void ProtocolGame::sendIcons(uint16_t icons)
 void ProtocolGame::sendContainer(uint8_t cid, const Container* container, bool hasParent, uint16_t firstIndex)
 {
 	NetworkMessage msg;
-	CamForensicEntries camForensicEntries;
 	msg.addByte(0x6E);
 
 	msg.addByte(cid);
@@ -2475,7 +2231,6 @@ void ProtocolGame::sendContainer(uint8_t cid, const Container* container, bool h
 	const ItemDeque& itemList = container->getItemList();
 	for (ItemDeque::const_iterator it = itemList.begin() + firstIndex, end = itemList.end(); i < 0xFF && it != end; ++it, ++i) {
 		msg.addItem(*it);
-		appendCamForensicEntry(camForensicEntries, *it, 'C', cid, i);
 	}
 
 	/*msg.addByte(container->isUnlocked() ? 0x01 : 0x00); // Drag and drop
@@ -2495,7 +2250,6 @@ void ProtocolGame::sendContainer(uint8_t cid, const Container* container, bool h
 		msg.addByte(0x00);
 	}*/
 	writeToOutputBuffer(msg);
-	sendCamForensicEntries(camForensicEntries);
 }
 
 void ProtocolGame::sendShop(Npc* npc, const ShopInfoList& itemList)
@@ -3313,15 +3067,13 @@ void ProtocolGame::sendFYIBox(const std::string& message)
 void ProtocolGame::sendMapDescription(const Position& pos)
 {
 	NetworkMessage msg;
-	CamForensicEntries camForensicEntries;
 	msg.addByte(0x64);
 	msg.addPosition(player->getPosition());
 	GetMapDescription(
 		pos.x - Map::maxClientViewportX, pos.y - Map::maxClientViewportY, pos.z,
 		(Map::maxClientViewportX * 2) + 2, (Map::maxClientViewportY * 2) + 2,
-		msg, &camForensicEntries);
+		msg);
 	writeToOutputBuffer(msg);
-	sendCamForensicEntries(camForensicEntries);
 	g_playerShop.syncVisibleLabels(player);
 }
 
@@ -3337,11 +3089,6 @@ void ProtocolGame::sendAddTileItem(const Position& pos, uint32_t stackpos, const
 	msg.addByte(stackpos);
 	msg.addItem(item);
 	writeToOutputBuffer(msg);
-
-	CamForensicEntries camForensicEntries;
-	appendCamForensicEntry(
-		camForensicEntries, item, 'M', pos.x, pos.y, pos.z, stackpos);
-	sendCamForensicEntries(camForensicEntries);
 }
 
 void ProtocolGame::sendUpdateTileItem(const Position& pos, uint32_t stackpos, const Item* item)
@@ -3356,11 +3103,6 @@ void ProtocolGame::sendUpdateTileItem(const Position& pos, uint32_t stackpos, co
 	msg.addByte(stackpos);
 	msg.addItem(item);
 	writeToOutputBuffer(msg);
-
-	CamForensicEntries camForensicEntries;
-	appendCamForensicEntry(
-		camForensicEntries, item, 'M', pos.x, pos.y, pos.z, stackpos);
-	sendCamForensicEntries(camForensicEntries);
 }
 
 void ProtocolGame::sendRemoveTileThing(const Position& pos, uint32_t stackpos)
@@ -3420,12 +3162,11 @@ void ProtocolGame::sendUpdateTile(const Tile* tile, const Position& pos)
 	}
 
 	NetworkMessage msg;
-	CamForensicEntries camForensicEntries;
 	msg.addByte(0x69);
 	msg.addPosition(pos);
 
 	if (tile) {
-		GetTileDescription(tile, msg, &camForensicEntries);
+		GetTileDescription(tile, msg);
 		msg.addByte(0x00);
 		msg.addByte(0xFF);
 	} else {
@@ -3434,7 +3175,6 @@ void ProtocolGame::sendUpdateTile(const Tile* tile, const Position& pos)
 	}
 
 	writeToOutputBuffer(msg);
-	sendCamForensicEntries(camForensicEntries);
 }
 
 void ProtocolGame::sendPendingStateEntered()
@@ -3578,7 +3318,6 @@ void ProtocolGame::sendMoveCreature(const Creature* creature, const Position& ne
 			sendMapDescription(newPos);
 		} else {
 			NetworkMessage msg;
-			CamForensicEntries camForensicEntries;
 			if (oldPos.z == 7 && newPos.z >= 8) {
 				RemoveTileCreature(msg, creature, oldPos, oldStackPos);
 			} else {
@@ -3594,28 +3333,27 @@ void ProtocolGame::sendMoveCreature(const Creature* creature, const Position& ne
 			}
 
 			if (newPos.z > oldPos.z) {
-				MoveDownCreature(msg, creature, newPos, oldPos, &camForensicEntries);
+				MoveDownCreature(msg, creature, newPos, oldPos);
 			} else if (newPos.z < oldPos.z) {
-				MoveUpCreature(msg, creature, newPos, oldPos, &camForensicEntries);
+				MoveUpCreature(msg, creature, newPos, oldPos);
 			}
 
 			if (oldPos.y > newPos.y) { // north, for old x
 				msg.addByte(0x65);
-				GetMapDescription(oldPos.x - Map::maxClientViewportX, newPos.y - Map::maxClientViewportY, newPos.z, (Map::maxClientViewportX * 2) + 2, 1, msg, &camForensicEntries);
+				GetMapDescription(oldPos.x - Map::maxClientViewportX, newPos.y - Map::maxClientViewportY, newPos.z, (Map::maxClientViewportX * 2) + 2, 1, msg);
 			} else if (oldPos.y < newPos.y) { // south, for old x
 				msg.addByte(0x67);
-				GetMapDescription(oldPos.x - Map::maxClientViewportX, newPos.y + (Map::maxClientViewportY + 1), newPos.z, (Map::maxClientViewportX * 2) + 2, 1, msg, &camForensicEntries);
+				GetMapDescription(oldPos.x - Map::maxClientViewportX, newPos.y + (Map::maxClientViewportY + 1), newPos.z, (Map::maxClientViewportX * 2) + 2, 1, msg);
 			}
 
 			if (oldPos.x < newPos.x) { // east, [with new y]
 				msg.addByte(0x66);
-				GetMapDescription(newPos.x + (Map::maxClientViewportX + 1), newPos.y - Map::maxClientViewportY, newPos.z, 1, (Map::maxClientViewportY * 2) + 2, msg, &camForensicEntries);
+				GetMapDescription(newPos.x + (Map::maxClientViewportX + 1), newPos.y - Map::maxClientViewportY, newPos.z, 1, (Map::maxClientViewportY * 2) + 2, msg);
 			} else if (oldPos.x > newPos.x) { // west, [with new y]
 				msg.addByte(0x68);
-				GetMapDescription(newPos.x - Map::maxClientViewportX, newPos.y - Map::maxClientViewportY, newPos.z, 1, (Map::maxClientViewportY * 2) + 2, msg, &camForensicEntries);
+				GetMapDescription(newPos.x - Map::maxClientViewportX, newPos.y - Map::maxClientViewportY, newPos.z, 1, (Map::maxClientViewportY * 2) + 2, msg);
 			}
 			writeToOutputBuffer(msg);
-			sendCamForensicEntries(camForensicEntries);
 			g_playerShop.syncVisibleLabels(player);
 		}
 	} else if (canSee(oldPos) && canSee(creature->getPosition())) {
@@ -3645,18 +3383,15 @@ void ProtocolGame::sendMoveCreature(const Creature* creature, const Position& ne
 void ProtocolGame::sendInventoryItem(slots_t slot, const Item* item)
 {
 	NetworkMessage msg;
-	CamForensicEntries camForensicEntries;
 	if (item) {
 		msg.addByte(0x78);
 		msg.addByte(slot);
 		msg.addItem(item);
-		appendCamForensicEntry(camForensicEntries, item, 'I', slot);
 	} else {
 		msg.addByte(0x79);
 		msg.addByte(slot);
 	}
 	writeToOutputBuffer(msg);
-	sendCamForensicEntries(camForensicEntries);
 }
 
 void ProtocolGame::sendItems()
@@ -3689,10 +3424,6 @@ void ProtocolGame::sendAddContainerItem(uint8_t cid, uint16_t, const Item* item)
 	//msg.add<uint16_t>(slot);
 	msg.addItem(item);
 	writeToOutputBuffer(msg);
-
-	CamForensicEntries camForensicEntries;
-	appendCamForensicEntry(camForensicEntries, item, 'C', cid, 0);
-	sendCamForensicEntries(camForensicEntries);
 }
 
 void ProtocolGame::sendUpdateContainerItem(uint8_t cid, uint16_t slot, const Item* item)
@@ -3704,10 +3435,6 @@ void ProtocolGame::sendUpdateContainerItem(uint8_t cid, uint16_t slot, const Ite
 	msg.addByte(slot);
 	msg.addItem(item);
 	writeToOutputBuffer(msg);
-
-	CamForensicEntries camForensicEntries;
-	appendCamForensicEntry(camForensicEntries, item, 'C', cid, slot);
-	sendCamForensicEntries(camForensicEntries);
 }
 
 void ProtocolGame::sendRemoveContainerItem(uint8_t cid, uint16_t slot, const Item*)
@@ -3964,7 +3691,11 @@ void ProtocolGame::sendBestiaryCharmsData()
 		return;
 	}
 
-	player->loadCharmStatesFromDatabase();
+	// Charm states are authoritative in memory for the whole session: the only
+	// writer (Player::setCharmState) updates memory and database atomically on
+	// the Dispatcher, and login loads the states once. Reloading here made
+	// every bestiary window opening run a synchronous database query on the
+	// Dispatcher (M3).
 	const auto entries = loadBestiaryEntries(*player);
 
 	std::vector<uint16_t> finishedMonsters;
@@ -4480,7 +4211,7 @@ void ProtocolGame::RemoveTileCreature(NetworkMessage& msg, const Creature* creat
 }
 
 void ProtocolGame::MoveUpCreature(NetworkMessage& msg, const Creature* creature, const Position& newPos,
-                                  const Position& oldPos, CamForensicEntries* camForensicEntries)
+                                  const Position& oldPos)
 {
 	if (creature != player) {
 		return;
@@ -4495,7 +4226,7 @@ void ProtocolGame::MoveUpCreature(NetworkMessage& msg, const Creature* creature,
 
 		// floor 7 and 6 already set
 		for (int i = 5; i >= 0; --i) {
-			GetFloorDescription(msg, oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, i, (Map::maxClientViewportX * 2) + 2, (Map::maxClientViewportY * 2) + 2, 8 - i, skip, camForensicEntries);
+			GetFloorDescription(msg, oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, i, (Map::maxClientViewportX * 2) + 2, (Map::maxClientViewportY * 2) + 2, 8 - i, skip);
 		}
 		if (skip >= 0) {
 			msg.addByte(skip);
@@ -4505,7 +4236,7 @@ void ProtocolGame::MoveUpCreature(NetworkMessage& msg, const Creature* creature,
 	//underground, going one floor up (still underground)
 	else if (newPos.z > 7) {
 		int32_t skip = -1;
-		GetFloorDescription(msg, oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, oldPos.getZ() - 3, (Map::maxClientViewportX * 2) + 2, (Map::maxClientViewportY * 2) + 2, 3, skip, camForensicEntries);
+		GetFloorDescription(msg, oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, oldPos.getZ() - 3, (Map::maxClientViewportX * 2) + 2, (Map::maxClientViewportY * 2) + 2, 3, skip);
 
 		if (skip >= 0) {
 			msg.addByte(skip);
@@ -4516,15 +4247,15 @@ void ProtocolGame::MoveUpCreature(NetworkMessage& msg, const Creature* creature,
 	//moving up a floor up makes us out of sync
 	//west
 	msg.addByte(0x68);
-	GetMapDescription(oldPos.x - Map::maxClientViewportX, oldPos.y - (Map::maxClientViewportY - 1), newPos.z, 1, (Map::maxClientViewportY * 2) + 2, msg, camForensicEntries);
+	GetMapDescription(oldPos.x - Map::maxClientViewportX, oldPos.y - (Map::maxClientViewportY - 1), newPos.z, 1, (Map::maxClientViewportY * 2) + 2, msg);
 
 	//north
 	msg.addByte(0x65);
-	GetMapDescription(oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, newPos.z, (Map::maxClientViewportX * 2) + 2, 1, msg, camForensicEntries);
+	GetMapDescription(oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, newPos.z, (Map::maxClientViewportX * 2) + 2, 1, msg);
 }
 
 void ProtocolGame::MoveDownCreature(NetworkMessage& msg, const Creature* creature, const Position& newPos,
-                                    const Position& oldPos, CamForensicEntries* camForensicEntries)
+                                    const Position& oldPos)
 {
 	if (creature != player) {
 		return;
@@ -4538,7 +4269,7 @@ void ProtocolGame::MoveDownCreature(NetworkMessage& msg, const Creature* creatur
 		int32_t skip = -1;
 
 		for (int i = 0; i < 3; ++i) {
-			GetFloorDescription(msg, oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, newPos.z + i, (Map::maxClientViewportX * 2) + 2, (Map::maxClientViewportY * 2) + 2, -i - 1, skip, camForensicEntries);
+			GetFloorDescription(msg, oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, newPos.z + i, (Map::maxClientViewportX * 2) + 2, (Map::maxClientViewportY * 2) + 2, -i - 1, skip);
 		}
 		if (skip >= 0) {
 			msg.addByte(skip);
@@ -4548,7 +4279,7 @@ void ProtocolGame::MoveDownCreature(NetworkMessage& msg, const Creature* creatur
 	//going further down
 	else if (newPos.z > oldPos.z && newPos.z > 8 && newPos.z < 14) {
 		int32_t skip = -1;
-		GetFloorDescription(msg, oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, newPos.z + 2, (Map::maxClientViewportX * 2) + 2, (Map::maxClientViewportY * 2) + 2, -3, skip, camForensicEntries);
+		GetFloorDescription(msg, oldPos.x - Map::maxClientViewportX, oldPos.y - Map::maxClientViewportY, newPos.z + 2, (Map::maxClientViewportX * 2) + 2, (Map::maxClientViewportY * 2) + 2, -3, skip);
 
 		if (skip >= 0) {
 			msg.addByte(skip);
@@ -4559,11 +4290,11 @@ void ProtocolGame::MoveDownCreature(NetworkMessage& msg, const Creature* creatur
 	//moving down a floor makes us out of sync
 	//east
 	msg.addByte(0x66);
-	GetMapDescription(oldPos.x + (Map::maxClientViewportX + 1), oldPos.y - (Map::maxClientViewportY + 1), newPos.z, 1, (Map::maxClientViewportY * 2) + 2, msg, camForensicEntries);
+	GetMapDescription(oldPos.x + (Map::maxClientViewportX + 1), oldPos.y - (Map::maxClientViewportY + 1), newPos.z, 1, (Map::maxClientViewportY * 2) + 2, msg);
 
 	//south
 	msg.addByte(0x67);
-	GetMapDescription(oldPos.x - Map::maxClientViewportX, oldPos.y + (Map::maxClientViewportY + 1), newPos.z, (Map::maxClientViewportX * 2) + 2, 1, msg, camForensicEntries);
+	GetMapDescription(oldPos.x - Map::maxClientViewportX, oldPos.y + (Map::maxClientViewportY + 1), newPos.z, (Map::maxClientViewportX * 2) + 2, 1, msg);
 }
 
 void ProtocolGame::AddShopItem(NetworkMessage& msg, const ShopInfo& item)

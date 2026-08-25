@@ -20,12 +20,21 @@
 #ifndef FS_CONNECTION_H_FC8E1B4392D24D27A2F129D8B93A6348
 #define FS_CONNECTION_H_FC8E1B4392D24D27A2F129D8B93A6348
 
+#include <atomic>
 #include <unordered_set>
 
 #include "networkmessage.h"
 
 static constexpr int32_t CONNECTION_WRITE_TIMEOUT = 30;
 static constexpr int32_t CONNECTION_READ_TIMEOUT = 30;
+
+// Hard caps for the per-connection output queue (A11). A peer that reads too
+// slowly — but still fast enough to stay under the write timeout — would
+// otherwise accumulate up to ~24.5 KB messages without bound. Exceeding either
+// cap force-closes the connection. The message cap also bounds the number of
+// queued shared_ptr/asio operations when a peer stalls on small packets.
+static constexpr size_t CONNECTION_OUTPUT_QUEUE_MAX_MESSAGES = 256;
+static constexpr size_t CONNECTION_OUTPUT_QUEUE_MAX_BYTES = 1u << 20; // 1 MiB
 
 class Protocol;
 using Protocol_ptr = std::shared_ptr<Protocol>;
@@ -52,11 +61,32 @@ class ConnectionManager
 		void releaseConnection(const Connection_ptr& connection);
 		void closeAll();
 
+		// Output queue depth accounting (A11). Bytes are approximated by the
+		// pre-encryption message length; the final frame adds a small header.
+		// Updated by Connection::send/onWriteOperation under connectionLock.
+		void addOutputQueueBytes(uint64_t bytes);
+		void removeOutputQueueBytes(uint64_t bytes);
+		void recordOutputQueueOverflowDisconnect();
+
+		uint64_t getQueuedOutputBytes() const {
+			return queuedOutputBytes.load(std::memory_order_relaxed);
+		}
+		uint64_t getPeakQueuedOutputBytes() const {
+			return peakQueuedOutputBytes.load(std::memory_order_relaxed);
+		}
+		uint64_t getOutputQueueOverflowDisconnects() const {
+			return outputQueueOverflowDisconnects.load(std::memory_order_relaxed);
+		}
+
 	private:
 		ConnectionManager() = default;
 
 		std::unordered_set<Connection_ptr> connections;
 		std::mutex connectionManagerLock;
+
+		std::atomic<uint64_t> queuedOutputBytes{0};
+		std::atomic<uint64_t> peakQueuedOutputBytes{0};
+		std::atomic<uint64_t> outputQueueOverflowDisconnects{0};
 };
 
 class Connection : public std::enable_shared_from_this<Connection>
@@ -88,6 +118,20 @@ class Connection : public std::enable_shared_from_this<Connection>
 
 		uint32_t getIP();
 
+		// Held across every io-thread parse handler (parseHeader/parsePacket)
+		// and by close()/send(). Protocol::release() on the Dispatcher acquires
+		// this once before destroying the protocol's player, which proves no
+		// io-thread parse is currently reading protocol/player state (and none
+		// can start anymore, because close() sets closed=true under this same
+		// lock before posting the release task).
+		//
+		// WARNING: code running while holding this lock must never block waiting
+		// for the Dispatcher — parse handlers only enqueue tasks. Violating this
+		// would deadlock Protocol::release() (and therefore the Dispatcher).
+		std::recursive_mutex& getConnectionLock() {
+			return connectionLock;
+		}
+
 	private:
 		void parseHeader(const boost::system::error_code& error);
 		void parsePacket(const boost::system::error_code& error);
@@ -111,7 +155,19 @@ class Connection : public std::enable_shared_from_this<Connection>
 
 		std::recursive_mutex connectionLock;
 
-		std::list<OutputMessage_ptr> messageQueue;
+		struct QueuedOutputMessage {
+			OutputMessage_ptr message;
+			// getLength() captured at enqueue time. onSendMessage() grows the
+			// frame during encryption before the write completes, so reading
+			// the length at pop time would not match the value accounted at
+			// enqueue and the byte counter would drift negative.
+			uint64_t bytes;
+		};
+
+		std::list<QueuedOutputMessage> messageQueue;
+		// Sum of the queued byte counts above, kept in sync under
+		// connectionLock and mirrored into ConnectionManager's global counter.
+		uint64_t messageQueueBytes = 0;
 
 		ConstServicePort_ptr service_port;
 		Protocol_ptr protocol;

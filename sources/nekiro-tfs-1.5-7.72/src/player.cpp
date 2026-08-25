@@ -296,7 +296,8 @@ bool Player::setCharmState(uint8_t charmId, PlayerCharmState state, bool persist
 
 bool Player::unlockCharm(uint8_t charmId)
 {
-	loadCharmStatesFromDatabase();
+	// charmStates is authoritative in memory during the session (M3): loaded
+	// once at login and kept in sync by setCharmState.
 	if (getCharmState(charmId) != PlayerCharmState::LOCKED) {
 		return false;
 	}
@@ -305,7 +306,6 @@ bool Player::unlockCharm(uint8_t charmId)
 
 bool Player::activateCharm(uint8_t charmId)
 {
-	loadCharmStatesFromDatabase();
 	if (getCharmState(charmId) != PlayerCharmState::UNLOCKED) {
 		return false;
 	}
@@ -408,6 +408,16 @@ Player::~Player()
 
 	setWriteItem(nullptr);
 	setEditHouse(nullptr);
+
+	for (const auto& it : depotChests) {
+		// Chests parented to a locker are released by the locker's ~Container
+		// itemlist cleanup during member destruction; orphan chests created
+		// without a locker are owned by this map alone. Destroy them last so
+		// any writeItem/editHouse reference held inside them is released first.
+		if (it.second->getParent() == nullptr) {
+			it.second->decrementReferenceCounter();
+		}
+	}
 }
 
 bool Player::setVocation(uint16_t vocId)
@@ -1088,17 +1098,17 @@ void Player::addContainer(uint8_t cid, Container* container)
 		return;
 	}
 
-	/*if (container->getID() == ITEM_BROWSEFIELD) {
+	if (container->getID() == ITEM_BROWSEFIELD) {
 		container->incrementReferenceCounter();
-	}*/
+	}
 
 	auto it = openContainers.find(cid);
 	if (it != openContainers.end()) {
 		OpenContainer& openContainer = it->second;
-		/*Container* oldContainer = openContainer.container;
+		Container* oldContainer = openContainer.container;
 		if (oldContainer->getID() == ITEM_BROWSEFIELD) {
 			oldContainer->decrementReferenceCounter();
-		}*/
+		}
 
 		openContainer.container = container;
 		openContainer.index = 0;
@@ -1117,13 +1127,13 @@ void Player::closeContainer(uint8_t cid)
 		return;
 	}
 
-	//OpenContainer openContainer = it->second;
-	//Container* container = openContainer.container;
+	OpenContainer openContainer = it->second;
+	Container* container = openContainer.container;
 	openContainers.erase(it);
 
-	/*if (container && container->getID() == ITEM_BROWSEFIELD) {
+	if (container && container->getID() == ITEM_BROWSEFIELD) {
 		container->decrementReferenceCounter();
-	}*/
+	}
 }
 
 void Player::setContainerIndex(uint8_t cid, uint16_t index)
@@ -1415,6 +1425,8 @@ DepotChest* Player::getDepotChest(uint32_t depotId, bool autoCreate)
 	}
 
 	it = depotChests.emplace(depotId, new DepotChest(ITEM_DEPOT)).first;
+	// The owning locker itemlist releases this reference in ~Container.
+	it->second->incrementReferenceCounter();
 	it->second->setMaxDepotItems(getMaxDepotItems());
 	return it->second;
 }
@@ -1884,7 +1896,11 @@ void Player::onRemoveCreature(Creature* creature, bool isLogout)
 			DispatcherLogoutMetricsContext logoutMetricsContext;
 			DispatcherPhaseMetricsTimer saveTimer(DispatcherMetricsPhase::LOGOUT_SAVE_TOTAL);
 			for (uint32_t tries = 0; tries < 3; ++tries) {
-				if (IOLoginData::savePlayer(this)) {
+				// allowDeferredCheckpointSave: when a floor checkpoint for this
+				// player is still in flight, the save is captured and queued
+				// behind it on the checkpoint worker instead of blocking the
+				// Dispatcher on the drain barrier.
+				if (IOLoginData::savePlayer(this, true)) {
 					saved = true;
 					break;
 				}

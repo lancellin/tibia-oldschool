@@ -28,7 +28,6 @@
 #include "configmanager.h"
 #include "scriptmanager.h"
 #include "rsa.h"
-#include "camforensics.h"
 #include "protocolold.h"
 #include "protocollogin.h"
 #include "protocolstatus.h"
@@ -54,7 +53,6 @@ Monsters g_monsters;
 Vocations g_vocations;
 extern Scripts* g_scripts;
 RSA g_RSA;
-CamForensicSigner g_camForensicSigner;
 
 std::mutex g_loaderLock;
 std::condition_variable g_loaderSignal;
@@ -200,13 +198,6 @@ void mainLoader(int, char*[], ServiceManager* services)
 	try {
 		g_RSA.loadPEM("key.pem");
 	} catch(const std::exception& e) {
-		startupErrorMessage(e.what());
-		return;
-	}
-
-	try {
-		g_camForensicSigner.loadPEM("cam_forensic_private.pem");
-	} catch (const std::exception& e) {
 		startupErrorMessage(e.what());
 		return;
 	}

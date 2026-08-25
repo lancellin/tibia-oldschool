@@ -1191,6 +1191,24 @@ uint64_t Game::registerTradeCheckpoint(Player* player, Player* tradePartner,
 	return groupId;
 }
 
+bool Game::savePlayerShopPurchase(Player* seller, Player* buyer, Cylinder* sellerContainer, Item* soldItem)
+{
+	// The purchase itself already happened atomically on the Dispatcher; this
+	// only covers durability. Registering both participants into a single
+	// checkpoint group guarantees they are persisted together: the worker
+	// commits every captured player save in one transaction, and FIFO ordering
+	// keeps any later logout save of either player behind this checkpoint.
+	// buyer is passed as its own trade source because it contributes money,
+	// not an item; resolveFloorCheckpointEndpoint stops at the player and adds
+	// no tile/house endpoint.
+	const uint64_t groupId = registerTradeCheckpoint(seller, buyer, sellerContainer, buyer, soldItem, nullptr);
+	if (groupId == 0) {
+		return false;
+	}
+
+	return enqueueFloorCheckpointGroup(groupId);
+}
+
 bool Game::commitActiveMailTransferCheckpoint(Player* recipient, Item* deliveredItem)
 {
 	if (!activeMailTransferCheckpoint.active || !activeMailTransferCheckpoint.sender ||
@@ -2108,6 +2126,123 @@ void Game::releaseInFlightCheckpointPlayers(const std::set<uint32_t>& playerGuid
 	}
 }
 
+bool Game::enqueueDeferredPlayerSave(Player* player, uint32_t legacyReservationId)
+{
+	if (!player) {
+		return false;
+	}
+
+	const uint32_t playerGuid = player->getGUID();
+	if (playerGuid == 0 || deferredPlayerSaves.count(playerGuid) != 0) {
+		return false;
+	}
+
+	// Capture the complete logout save (online status flip included) as
+	// immutable statements while the Player is still alive on the Dispatcher.
+	// Only strings cross to the worker; the Player may be destroyed right
+	// after logout returns.
+	std::vector<std::string> statements;
+	std::string error;
+	if (!IOLoginData::buildPlayerSaveSnapshot(player, statements, error)) {
+		std::cout << "[Warning - Game::enqueueDeferredPlayerSave] could not capture "
+		          << "the deferred logout save for " << player->getName() << ": "
+		          << error << std::endl;
+		return false;
+	}
+
+	auto job = std::make_unique<CheckpointJob>();
+	job->playerStatements = std::move(statements);
+	job->playerGuids.insert(playerGuid);
+	job->playerSaveOnly = true;
+	job->deferredPlayerGuid = playerGuid;
+	job->deferredPlayerName = player->getName();
+	job->deferredLegacyReservationId = legacyReservationId;
+
+	// The worker executes jobs strictly in queue order, so every older
+	// in-flight checkpoint for this player commits before this newer save.
+	if (!g_checkpointWorker.enqueue(std::move(job))) {
+		return false;
+	}
+
+	deferredPlayerSaves.insert(playerGuid);
+	return true;
+}
+
+void Game::completeDeferredPlayerSave(CheckpointResult& result)
+{
+	const std::unique_ptr<CheckpointJob>& job = result.job;
+	const uint32_t playerGuid = job->deferredPlayerGuid;
+	const uint32_t reservationId = job->deferredLegacyReservationId;
+	const std::string playerName = job->deferredPlayerName;
+
+	if (result.success) {
+		deferredPlayerSaves.erase(playerGuid);
+		g_playerIOManager.releaseLegacyOperation(reservationId);
+		return;
+	}
+
+	// The captured statements are idempotent (same snapshot), so a bounded
+	// retry with the identical job is safe. Never discard silently: only after
+	// every attempt failed is the reservation released and the failure logged.
+	if (job->deferredAttempts < 2 && g_checkpointWorker.isHealthy()) {
+		std::unique_ptr<CheckpointJob> retryJob = std::move(result.job);
+		++retryJob->deferredAttempts;
+		const uint32_t retryAttempt = retryJob->deferredAttempts;
+		if (g_checkpointWorker.enqueue(std::move(retryJob))) {
+			std::cout << "[Warning - Game::completeDeferredPlayerSave] deferred logout "
+			          << "save for " << playerName << " failed ("
+			          << result.error << "); retry " << retryAttempt
+			          << " queued. Relog remains blocked until it commits." << std::endl;
+			return;
+		}
+	}
+
+	deferredPlayerSaves.erase(playerGuid);
+	g_playerIOManager.releaseLegacyOperation(reservationId);
+	std::cout << "[Error - Game::completeDeferredPlayerSave] deferred logout save for "
+	          << playerName << " (guid " << playerGuid
+	          << ") failed after every retry: " << result.error
+	          << ". Progress since the last committed checkpoint may be lost."
+	          << std::endl;
+}
+
+void Game::replayDeferredPlayerSave(std::unique_ptr<CheckpointJob> job)
+{
+	const uint32_t playerGuid = job->deferredPlayerGuid;
+	const uint32_t reservationId = job->deferredLegacyReservationId;
+	deferredPlayerSaves.erase(playerGuid);
+
+	// The dead worker's dedicated connection was closed, rolling back any
+	// in-flight checkpoint transaction, so replaying the captured statements
+	// synchronously cannot be overwritten by older state.
+	bool saved = false;
+	DBTransaction transaction;
+	if (transaction.begin()) {
+		bool ok = true;
+		for (const std::string& statement : job->playerStatements) {
+			if (!Database::getInstance().executeQuery(statement)) {
+				ok = false;
+				break;
+			}
+		}
+		saved = ok && transaction.commit();
+	}
+
+	if (saved) {
+		std::cout << "[Notice - Game::replayDeferredPlayerSave] deferred logout save for "
+		          << job->deferredPlayerName << " replayed synchronously after the "
+		          << "checkpoint worker died." << std::endl;
+	} else {
+		std::cout << "[Error - Game::replayDeferredPlayerSave] deferred logout save for "
+		          << job->deferredPlayerName << " (guid " << playerGuid
+		          << ") FAILED during synchronous replay after the checkpoint worker "
+		          << "died. Progress since the last committed checkpoint may be lost."
+		          << std::endl;
+	}
+
+	g_playerIOManager.releaseLegacyOperation(reservationId);
+}
+
 bool Game::drainCheckpointWorker(uint32_t timeoutMs)
 {
 	// Recover first in case the worker thread died and left work behind.
@@ -2158,7 +2293,8 @@ void Game::recoverDeadCheckpointWorker()
 	}
 
 	AbortedCheckpointWork aborted = g_checkpointWorker.abortAllPending();
-	if (aborted.queuedJobs.empty() && aborted.inFlightPlayerGuids.empty()) {
+	if (aborted.queuedJobs.empty() && aborted.inFlightPlayerGuids.empty() &&
+	    !aborted.inFlightJob) {
 		return;
 	}
 
@@ -2167,6 +2303,13 @@ void Game::recoverDeadCheckpointWorker()
 	          << "checkpoints fall back to the synchronous path." << std::endl;
 
 	for (std::unique_ptr<CheckpointJob>& job : aborted.queuedJobs) {
+		if (job->playerSaveOnly) {
+			// A deferred logout save must never be dropped with the worker:
+			// replay its immutable statements synchronously instead.
+			replayDeferredPlayerSave(std::move(job));
+			continue;
+		}
+
 		auto groupIt = floorCheckpointGroups.find(job->groupId);
 		if (groupIt != floorCheckpointGroups.end()) {
 			groupIt->second.workerInFlight = false;
@@ -2177,8 +2320,28 @@ void Game::recoverDeadCheckpointWorker()
 		releaseInFlightCheckpointPlayers(job->playerGuids);
 	}
 
-	// Release the reservation of the job that was executing when the thread died.
-	releaseInFlightCheckpointPlayers(aborted.inFlightPlayerGuids);
+	// Settle the job that was executing when the thread died. Its transaction
+	// rolled back with the worker's connection, so it can be replayed (deferred
+	// logout save) or its group retried (floor checkpoint) without ordering
+	// risk; leaving it unhandled would wedge the group or the reservation.
+	if (aborted.inFlightJob) {
+		if (aborted.inFlightJob->playerSaveOnly) {
+			replayDeferredPlayerSave(std::move(aborted.inFlightJob));
+		} else {
+			auto groupIt = floorCheckpointGroups.find(aborted.inFlightJob->groupId);
+			if (groupIt != floorCheckpointGroups.end()) {
+				groupIt->second.workerInFlight = false;
+			}
+			failFloorCheckpointGroup(groupIt != floorCheckpointGroups.end() ? &groupIt->second : nullptr,
+				"checkpoint worker thread died while executing the job",
+				CheckpointGroupFailureKind::WORKER_ABORTED);
+			releaseInFlightCheckpointPlayers(aborted.inFlightJob->playerGuids);
+		}
+	} else {
+		// Release the reservation of the job that was executing when the
+		// thread died.
+		releaseInFlightCheckpointPlayers(aborted.inFlightPlayerGuids);
+	}
 }
 
 void Game::processCheckpointResults()
@@ -2195,6 +2358,13 @@ void Game::processCheckpointResults()
 		recordDispatcherPhase(DispatcherMetricsPhase::FLOOR_CHECKPOINT_WORKER_BEGIN, result.beginNanoseconds);
 		recordDispatcherPhase(DispatcherMetricsPhase::FLOOR_CHECKPOINT_WORKER_SQL, result.sqlNanoseconds);
 		recordDispatcherPhase(DispatcherMetricsPhase::FLOOR_CHECKPOINT_WORKER_COMMIT, result.commitNanoseconds);
+
+		// Deferred logout saves settle independently of the floor checkpoint
+		// group bookkeeping (no group, no snapshots, no marker).
+		if (job.playerSaveOnly) {
+			completeDeferredPlayerSave(result);
+			continue;
+		}
 
 		if (result.success) {
 			floorSnapshotStats.queued += job.snapshots.size();
@@ -9388,7 +9558,8 @@ void Game::playerUnlockCharm(uint32_t playerId, uint8_t charmId)
 		return;
 	}
 
-	player->loadCharmStatesFromDatabase();
+	// Charm states are authoritative in memory (see Player::setCharmState);
+	// no database reload here (M3).
 	if (player->getCharmState(charmId) != PlayerCharmState::LOCKED) {
 		player->sendCancelMessage("This charm is already unlocked.");
 		player->sendCharmData();

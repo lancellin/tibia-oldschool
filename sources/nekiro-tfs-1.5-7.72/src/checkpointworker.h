@@ -46,6 +46,17 @@ struct CheckpointJob {
 	std::vector<std::string> floorStatements;
 	std::string markerStatement;
 
+	// Deferred logout saves: a synchronous player save captured on the
+	// Dispatcher and queued behind in-flight floor checkpoints so the newer
+	// state commits after every older captured state, without blocking the
+	// Dispatcher. They carry no floor/house work, skip the checkpoint marker
+	// and are settled without floor checkpoint group bookkeeping.
+	bool playerSaveOnly = false;
+	uint32_t deferredPlayerGuid = 0;
+	std::string deferredPlayerName;
+	uint32_t deferredLegacyReservationId = 0;
+	uint32_t deferredAttempts = 0;
+
 	// Retained for Dispatcher-side completion bookkeeping (clearing dirty
 	// tiles whose captured tileVersion still matches). Returned untouched.
 	std::vector<PreparedFloorSnapshot> snapshots;
@@ -72,6 +83,10 @@ struct CheckpointResult {
 // stuck forever.
 struct AbortedCheckpointWork {
 	std::vector<std::unique_ptr<CheckpointJob>> queuedJobs;
+	// The job being executed when the thread died (nullptr when none was in
+	// flight). Its transaction rolled back with the worker's connection; the
+	// Dispatcher replays deferred logout saves and retries checkpoint groups.
+	std::unique_ptr<CheckpointJob> inFlightJob;
 	// Player GUIDs held by the single in-flight job at the moment the thread
 	// died (empty when no job was in flight).
 	std::set<uint32_t> inFlightPlayerGuids;
@@ -146,6 +161,10 @@ class CheckpointWorker : public ThreadHolder<CheckpointWorker> {
 		std::condition_variable progressSignal;
 		std::deque<std::unique_ptr<CheckpointJob>> jobs;
 		std::deque<CheckpointResult> results;
+		// The job currently being executed. Kept under the mutex so
+		// abortAllPending can reclaim it (with its reservation metadata) when
+		// the thread dies mid-job.
+		std::unique_ptr<CheckpointJob> currentJob;
 		// Player GUIDs of the job currently being executed; needed to release
 		// reservations if the thread dies mid-job. Guarded by mutex.
 		std::set<uint32_t> inFlightPlayerGuids;

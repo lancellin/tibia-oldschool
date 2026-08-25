@@ -4,7 +4,6 @@ set(tfs_SRC
 	${CMAKE_CURRENT_LIST_DIR}/ban.cpp
 	${CMAKE_CURRENT_LIST_DIR}/baseevents.cpp
 	${CMAKE_CURRENT_LIST_DIR}/bed.cpp
-	${CMAKE_CURRENT_LIST_DIR}/camforensics.cpp
 	${CMAKE_CURRENT_LIST_DIR}/chat.cpp
 	${CMAKE_CURRENT_LIST_DIR}/checkpointworker.cpp
 	${CMAKE_CURRENT_LIST_DIR}/combat.cpp

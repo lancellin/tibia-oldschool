@@ -861,7 +861,7 @@ bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList,
 	return query_insert.execute();
 }
 
-bool IOLoginData::savePlayer(Player* player)
+bool IOLoginData::savePlayer(Player* player, bool allowDeferredCheckpointSave)
 
 {
 	const uint32_t legacyReservationId = player->playerIOReservationId;
@@ -873,13 +873,29 @@ bool IOLoginData::savePlayer(Player* player)
 	};
 
 	// If a background checkpoint job captured this player's state is still
-	// queued or in flight, wait for it to commit first so this synchronous save
-	// (which writes newer state) is not overwritten by the older captured state.
-	// If the barrier cannot be satisfied within the limit, refuse to write the
-	// newer state: an older checkpoint could still commit afterwards and roll
-	// the player back. Failing this save is the safe bounded behavior; the
-	// group stays pending and is retried/recovered by the checkpoint machinery.
+	// queued or in flight, the newer logout save must commit after it. Prefer
+	// deferring the save as an immutable job queued behind the checkpoint: the
+	// worker's FIFO ordering then guarantees the commit order without blocking
+	// the Dispatcher, and the legacy reservation keeps relogin blocked until
+	// the deferred save settles. Only when deferral is unavailable fall back
+	// to the blocking barrier; if the barrier cannot be satisfied within the
+	// limit, refuse to write the newer state: an older checkpoint could still
+	// commit afterwards and roll the player back. Failing this save is the
+	// safe bounded behavior; the group stays pending and is retried/recovered
+	// by the checkpoint machinery.
 	if (g_game.hasInFlightCheckpointForPlayer(player->getGUID())) {
+		const bool deferred = allowDeferredCheckpointSave &&
+			g_game.getGameState() == GAME_STATE_NORMAL &&
+			!g_game.isFloorCleanSaveWindowActive() &&
+			!g_game.isFloorCleanSaveInProgress() &&
+			g_playerIOManager.isEnabled() &&
+			g_game.enqueueDeferredPlayerSave(player, legacyReservationId);
+		if (deferred) {
+			// Ownership of the legacy reservation moved to the deferred job.
+			player->playerIOReservationId = 0;
+			return true;
+		}
+
 		if (!g_game.drainCheckpointWorker(30000)) {
 			std::cout << "[Warning - IOLoginData::savePlayer] player " << player->getGUID()
 			          << " has an in-flight checkpoint that did not finish in time; "
