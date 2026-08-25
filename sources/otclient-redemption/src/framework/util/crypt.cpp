@@ -22,8 +22,6 @@
 
 #include "crypt.h"
 
-#include <array>
-
 #ifndef USE_PRECOMPILED_HEADERS
 #include <algorithm>
 #include <cstddef>
@@ -38,7 +36,6 @@
 #endif
 
 #include <cppcodec/base64_rfc4648.hpp>
-#include <openssl/evp.h>
 
 #include "framework/core/graphicalapplication.h"
 #include "framework/core/resourcemanager.h"
@@ -57,16 +54,6 @@
 #endif
 
 constexpr std::size_t CHECKSUM_BYTES = sizeof(uint32_t);
-
-namespace
-{
-constexpr std::array<uint8_t, 32> CAM_FORENSIC_PUBLIC_KEY = {
-    0x51, 0xcd, 0x8d, 0xc1, 0xa8, 0x93, 0x65, 0x7c,
-    0x1b, 0x13, 0xce, 0x53, 0xab, 0xf2, 0x22, 0x92,
-    0xf6, 0x8b, 0x17, 0x35, 0xd7, 0x1b, 0x2f, 0xf7,
-    0x19, 0xcb, 0x88, 0x15, 0x85, 0x56, 0xbc, 0x46
-};
-}
 
 Crypt g_crypt;
 
@@ -106,56 +93,6 @@ std::string Crypt::base64Decode(const std::string_view& encoded_string) {
     } catch (const std::invalid_argument&) {
         return {};
     }
-}
-
-bool Crypt::verifyCamForensicSignature(const std::string& payload, const std::string& signatureBase64)
-{
-    const std::string signature = base64Decode(signatureBase64);
-    if (signature.size() != 64)
-        return false;
-
-    EVP_PKEY* key = EVP_PKEY_new_raw_public_key(
-        EVP_PKEY_ED25519, nullptr,
-        CAM_FORENSIC_PUBLIC_KEY.data(), CAM_FORENSIC_PUBLIC_KEY.size());
-    if (!key)
-        return false;
-
-    EVP_MD_CTX* context = EVP_MD_CTX_new();
-    if (!context) {
-        EVP_PKEY_free(key);
-        return false;
-    }
-
-    const bool valid =
-        EVP_DigestVerifyInit(context, nullptr, nullptr, nullptr, key) == 1 &&
-        EVP_DigestVerify(
-            context,
-            reinterpret_cast<const unsigned char*>(signature.data()), signature.size(),
-            reinterpret_cast<const unsigned char*>(payload.data()), payload.size()) == 1;
-
-    EVP_MD_CTX_free(context);
-    EVP_PKEY_free(key);
-    return valid;
-}
-
-std::string Crypt::sha256Hex(const std::string& value)
-{
-    std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
-    unsigned int digestSize = 0;
-    if (EVP_Digest(
-            value.data(), value.size(),
-            digest.data(), &digestSize,
-            EVP_sha256(), nullptr) != 1 || digestSize != 32) {
-        return {};
-    }
-
-    static constexpr char HEX[] = "0123456789abcdef";
-    std::string encoded(digestSize * 2, '0');
-    for (unsigned int index = 0; index < digestSize; ++index) {
-        encoded[index * 2] = HEX[digest[index] >> 4];
-        encoded[index * 2 + 1] = HEX[digest[index] & 0x0F];
-    }
-    return encoded;
 }
 
 void Crypt::xorCrypt(std::string& buffer, const std::string& key)

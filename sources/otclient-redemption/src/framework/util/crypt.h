@@ -67,8 +67,6 @@ public:
     bool rsaEncrypt(uint8_t* msg, int size);
     bool rsaDecrypt(uint8_t* msg, int size);
     int rsaGetSize();
-    bool verifyCamForensicSignature(const std::string& payload, const std::string& signatureBase64);
-    std::string sha256Hex(const std::string& value);
 
     std::string crc32(const std::string& decoded_string, bool upperCase);
 

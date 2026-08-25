@@ -3476,15 +3476,6 @@ function g_crypt.rsaSetPrivateKey(p, q, d) end
 ---@return integer
 function g_crypt.rsaGetSize() end
 
----@param payload string
----@param signatureBase64 string
----@return boolean
-function g_crypt.verifyCamForensicSignature(payload, signatureBase64) end
-
----@param value string
----@return string
-function g_crypt.sha256Hex(value) end
-
 --------------------------------
 ----------- g_clock ------------
 --------------------------------

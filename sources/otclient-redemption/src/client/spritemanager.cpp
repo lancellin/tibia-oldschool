@@ -100,7 +100,11 @@ bool SpriteManager::loadSpr(std::string file)
         loaded = loadHdpSpr(hdpFile) || loaded;
     }
 
-    if ((m_enableHdFastPack || m_enableHdOverrides) && g_resources.fileExists(cwmFile)) {
+    // CWM (PNG-based HD override) is only loaded when its own option is on.
+    // It must NOT piggyback on the fast-pack flag: the HDP pack already covers
+    // the same sprite set, and loading the CWM alongside it only adds a 50MB+
+    // file read, metadata in memory and a redundant lookup per sprite fetch.
+    if (m_enableHdOverrides && g_resources.fileExists(cwmFile)) {
         loaded = loadCwmSpr(cwmFile) || loaded;
     }
 

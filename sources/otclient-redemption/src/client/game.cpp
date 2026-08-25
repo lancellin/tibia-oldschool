@@ -910,10 +910,8 @@ void Game::look(const ThingPtr& thing, const bool isBattleList)
     if (!thing)
         return;
 
-    if (m_playingRecord) {
-        g_lua.callGlobalField("g_game", "onCamForensicLook", thing);
+    if (m_playingRecord)
         return;
-    }
 
     if (!canPerformGameAction())
         return;

@@ -441,8 +441,6 @@ private:
     bool m_mapKnown{ false };
     bool m_firstRecv{ true };
     bool m_record{ false };
-    uint16_t m_currentOpcodeStart{ 0 };
-    bool m_camTranscriptSealSeen{ false };
 
     ticks_t m_lastPartyAnalyzerCall{ 0 };
     int m_recivedPackeds = 0;

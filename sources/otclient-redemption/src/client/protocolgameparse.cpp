@@ -49,12 +49,9 @@ void ProtocolGame::parseMessage(const InputMessagePtr& msg)
 {
     int opcode = -1;
     int prevOpcode = -1;
-    bool parseComplete = false;
-    m_camTranscriptSealSeen = false;
 
     try {
         while (!msg->eof()) {
-            m_currentOpcodeStart = msg->getReadPos();
             opcode = msg->getU8();
             AutoStat s(STATS_PACKETS, fmt::format("{} (0x{:02X})", opcode, opcode));
 
@@ -681,7 +678,6 @@ void ProtocolGame::parseMessage(const InputMessagePtr& msg)
             }
             prevOpcode = opcode;
         }
-        parseComplete = true;
     } catch (const stdext::exception& e) {
         const auto unread = msg->getUnreadSize();
         const auto readPos = msg->getReadPos();
@@ -717,12 +713,6 @@ void ProtocolGame::parseMessage(const InputMessagePtr& msg)
                 hexDump.str()
             );
         }
-    }
-
-    if (g_game.isPlayingRecord()) {
-        g_lua.callGlobalField(
-            "g_game", "onCamTranscriptPacketEnd",
-            msg->getBodyBuffer(), m_camTranscriptSealSeen, parseComplete);
     }
 }
 
@@ -3839,16 +3829,7 @@ void ProtocolGame::parseExtendedOpcode(const InputMessagePtr& msg)
     const uint8_t opcode = msg->getU8();
     const auto& buffer = msg->getString();
 
-    if (opcode == 204) {
-        if (g_game.isPlayingRecord()) {
-            const bool duplicateSeal = m_camTranscriptSealSeen;
-            m_camTranscriptSealSeen = true;
-            g_lua.callGlobalField(
-                "g_game", "onCamTranscriptSeal",
-                buffer, msg->getBodyPrefix(m_currentOpcodeStart),
-                msg->eof(), duplicateSeal);
-        }
-    } else if (opcode == 0) {
+    if (opcode == 0) {
         m_enableSendExtendedOpcode = true;
     } else if (opcode == 2) {
         parsePingBack(msg);

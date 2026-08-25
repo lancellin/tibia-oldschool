@@ -44,14 +44,6 @@ public:
     void setBuffer(const std::string& buffer);
     std::string_view getBuffer() { return std::string_view{ (char*)m_buffer + m_headerPos, m_messageSize }; }
     std::string getBodyBuffer() { return std::string((char*)m_buffer + m_maxHeaderSize, m_messageSize - getHeaderSize()); }
-    std::string getBodyPrefix(uint16_t absoluteEnd) const
-    {
-        if (absoluteEnd < m_maxHeaderSize || absoluteEnd > m_messageSize + m_headerPos)
-            return {};
-        return std::string(
-            reinterpret_cast<const char*>(m_buffer + m_maxHeaderSize),
-            absoluteEnd - m_maxHeaderSize);
-    }
 
     void skipBytes(const uint16_t bytes) { m_readPos += bytes; }
     void setReadPos(const uint16_t readPos) { m_readPos = readPos; }
