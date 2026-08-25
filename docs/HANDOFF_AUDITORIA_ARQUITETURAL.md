@@ -48,6 +48,9 @@ necessário — tudo que importa está aqui e na memória.
   — sufixo `z` + aviso "BUILD DE TESTE" quando há mudanças tracked não commitadas
   (gerado a cada build por `cmake/gen_git_version.cmake`, automático).
 - Working tree limpo após a v0.3.0 (servidor e client commitados).
+- Binário v0.3.0 deployado: `server\tfs.exe` SHA256
+  `F7316904B22AAB087A506D3F0ADC44F875C8C94CB4CE61EC5A18B43BFBACBE5F`
+  (banner `tibia-oldschool v0.3.0 [1c8d63f]`, build limpo sem sufixo de teste).
 
 ## 3. O que já foi feito (commits no GitHub)
 
