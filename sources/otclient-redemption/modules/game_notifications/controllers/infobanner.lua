@@ -217,6 +217,22 @@ local infoPopUp = {
 
 -- LuaFormatter on
 
+-- The info banner is purely visual. Every widget in it must be non-focusable
+-- and click-through (phantom), otherwise the default auto-focus policy steals
+-- keyboard focus from the game/console while the banner is on screen and the
+-- player loses chat/movement input. Static children are covered by the CSS in
+-- the template; this also covers the outfit/item widgets appended at runtime.
+local function makeTreeInert(widget)
+    if not widget then
+        return
+    end
+    widget:setFocusable(false)
+    widget:setPhantom(true)
+    for _, child in ipairs(widget:getChildren()) do
+        makeTreeInert(child)
+    end
+end
+
 notificationsController.event = nil
 notificationsController.state = "idle"
 notificationsController.queue = {}
@@ -555,6 +571,10 @@ function notificationsController:processNext()
             end
         end
     end
+
+    -- Make the whole banner (including the outfit/item appended above) inert so
+    -- it never steals keyboard focus from the game/console while visible.
+    makeTreeInert(self.ui)
 
     self.state = "opening"
     debugPrint("Starting Banner ->", data.title)

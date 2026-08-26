@@ -44,6 +44,14 @@ necessário — tudo que importa está aqui e na memória.
   pré-hardening P2/P4) e
   `tfs.before-v0.3.0-rebuild-20260825.exe` (estado P2/P4 pré-rebuild da
   tag v0.3.0 — mesmo código, banner ainda sem a tag).
+- **v0.3.10** (client) commitada, taggeada e publicada no GitHub em 2026-08-25:
+  corrige o info banner (level/skill/bestiary) que bloqueava TODAS as hotkeys
+  e o foco do chat enquanto visível. O banner é criado com a tag `<window>`
+  (→ estilo `Window`/UIWindow) anexado à raiz, e `isForegroundWindowOpen()`
+  (game_hotkeys) o tratava como janela em primeiro plano. Correção: overlays
+  não-focáveis deixam de contar como janela em primeiro plano + banner tornado
+  não-focável/click-through. Só client; não requer rebuild do exe (módulos
+  carregam do disco em runtime). Nenhum binário de servidor afetado.
 - Banner de versão no terminal do servidor: `tibia-oldschool vX.Y.Z[z] [git sha]`
   — sufixo `z` + aviso "BUILD DE TESTE" quando há mudanças tracked não commitadas
   (gerado a cada build por `cmake/gen_git_version.cmake`, automático).
@@ -69,6 +77,7 @@ necessário — tudo que importa está aqui e na memória.
 | v0.2.10+A5+A6+A8+A10+A11+M3+P1-shop (working tree) | Correção P1 (auditoria de protocolo 2026-08-22): PlayerShop `buy` deixa de fazer 2× `savePlayer` síncrono no Dispatcher — save vira checkpoint conjunto assíncrono (`Game::savePlayerShopPurchase` → `registerTradeCheckpoint` + `enqueueFloorCheckpointGroup`), commitado pelo CheckpointWorker em uma única transação; fallback síncrono legado quando o mecanismo está indisponível |
 | v0.2.10+…+P1-shop+P2/P4 (working tree) | Hardening P2/P4 (auditoria de protocolo): access list de house sem suporte a guild (`@` ignorado — eliminadas até 3 queries DB síncronas por linha + o leak de `Guild` de `getGuildByName`) e com teto de 40 resoluções de nome por parse; rate limit de 1 s em 0x9A/0xDC/0xDE (campos `next*Request` em protocolgame.h) + descrição VIP limitada a 255 chars; cooldown de 2 s no `!deathlist` (Lua). Cache name→guid ficou DEFERIDO (risco de stale entries; residual aceitável com os caps) |
 | **v0.3.0** (commit + tag anotada + push em 2026-08-25) | Release que consolida TODAS as linhas "(working tree)" acima, servidor e client: A4 (remoção CAM forense server+client, PEMs deletados), A5 (leak do depot), A6 (browseFields dormente correto), A8 (save de logout diferido no checkpoint worker), A10 (barreira de lifecycle connectionLock), A11 (caps da fila de envio), M3 (charms cache-em-memória), P1 (PlayerShop buy → checkpoint conjunto assíncrono atômico), P2/P4 (hardening house access list + VIP/private/deathlist), CWM desacoplado do fast-pack no client. Inclusos: docs (handoff + release notes da CAM forense), CSVs do experimento A/B de spectators e `tools/map/replace_item_ids.py` |
+| **v0.3.10** (client, commit + tag anotada + push em 2026-08-25) | Correção do info banner (level up / skill up / bestiary unlock) que bloqueava todas as hotkeys e o foco do chat enquanto visível. Causa: o banner é criado com a tag `<window>` (casa com o estilo `Window`/UIWindow) e anexado à raiz via `Controller:loadHtml`; `isForegroundWindowOpen()` (game_hotkeys) tratava qualquer filho visível da raiz com "Window" no nome como janela em primeiro plano e bloqueava as hotkeys. Correção: (1) `isForegroundWindowOpen` ignora overlays não-focáveis; (2) banner e filhos (inclusive `uicreature`/`uiitem` de runtime) tornados não-focáveis e click-through. Não requer rebuild do exe (módulos carregam do disco) |
 
 Backups de binário: `server\backup_executables\` (convenção
 `tfs.before-<mudanca>-<data>.exe` ou `tfs.<versao>-before-<proxima>-<data>.exe`).

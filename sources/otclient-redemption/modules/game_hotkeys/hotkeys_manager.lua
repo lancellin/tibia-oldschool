@@ -977,10 +977,17 @@ local function isForegroundWindowOpen()
 
     for _, child in ipairs(rootWidget:getChildren()) do
         if child ~= gameRootPanel and child ~= topMenu and child:isVisible() then
-            local className = child:getClassName() or ''
-            local styleName = child:getStyleName() or ''
-            if className:find('Window') or styleName:find('Window') then
-                return true
+            -- Purely visual overlays (e.g. the game_notifications info banner,
+            -- created with a <window> tag and therefore "Window"-named) are
+            -- deliberately non-focusable and must not block hotkeys. Real
+            -- foreground windows remain focusable and keep blocking them; a
+            -- focused window is also caught by the root-focus check below.
+            if child:isFocusable() then
+                local className = child:getClassName() or ''
+                local styleName = child:getStyleName() or ''
+                if className:find('Window') or styleName:find('Window') then
+                    return true
+                end
             end
         end
     end
