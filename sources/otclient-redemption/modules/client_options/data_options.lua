@@ -26,34 +26,9 @@ return {
     classicControl                    = {
         value = true,
         action = function(value, options, controller, panels, extraWidgets)
-            -- Update the mouseControlMode based on this option
-            -- 0 = Regular Controls, 1 = Classic Controls, 2 = Left Smart-Click
-            local mouseControlMode = 0
-            if value == true then
-                mouseControlMode = 1 -- Classic Controls
-            elseif options.smartLeftClick.value == true then
-                mouseControlMode = 2 -- Left Smart-Click
-            else
-                mouseControlMode = 0 -- Regular Controls
-            end
-
-            -- Update the value in options table first
-            options.mouseControlMode.value = mouseControlMode
-
-            -- Then update settings
-            g_settings.set('mouseControlMode', mouseControlMode)
-
-            -- Update loot control visibility (only visible for Classic Controls)
-            local lootControlModeCombobox = panels.generalPanel:recursiveGetChildById('lootControlMode')
-            if lootControlModeCombobox then
-                lootControlModeCombobox:setVisible(mouseControlMode == 1)
-            end
-
-            -- Update the combobox UI
-            local mouseControlModeCombobox = panels.generalPanel:recursiveGetChildById('mouseControlMode')
-            if mouseControlModeCombobox then
-                mouseControlModeCombobox:setCurrentOption(mouseControlMode, true)
-            end
+            -- Classic Control checkbox:
+            -- checked = Classic Controls + Loot Right, unchecked = Regular Controls
+            setOption('mouseControlMode', value and 1 or 0)
         end
     },
     smartLeftClick                    = {
@@ -104,6 +79,9 @@ return {
                 options.smartLeftClick.value = false
                 g_settings.set('classicControl', true)
                 g_settings.set('smartLeftClick', false)
+                -- Classic Control always implies Loot: Right
+                options.lootControlMode.value = 0
+                g_settings.set('lootControlMode', 0)
             elseif value == 2 then
                 options.classicControl.value = false
                 options.smartLeftClick.value = true
@@ -113,22 +91,10 @@ return {
 
             -- Schedule UI updates to ensure they happen after value updates
             scheduleEvent(function()
-                -- Update the mouseControlMode combobox
-                local mouseControlModeCombobox = panels.generalPanel:recursiveGetChildById('mouseControlMode')
-                if mouseControlModeCombobox then
-                    -- Force the combobox to select the right option
-                    for i = 0, 2 do
-                        if i == value then
-                            mouseControlModeCombobox:setCurrentOptionByData(i)
-                            break
-                        end
-                    end
-                end
-
-                -- Update loot control mode visibility (only visible for Classic Controls)
-                local lootControlModeCombobox = panels.generalPanel:recursiveGetChildById('lootControlMode')
-                if lootControlModeCombobox then
-                    lootControlModeCombobox:setVisible(value == 1)
+                -- Sync the Classic Control checkbox state
+                local classicControlCheckbox = panels.generalPanel:recursiveGetChildById('classicControl')
+                if classicControlCheckbox then
+                    classicControlCheckbox:setChecked(value == 1)
                 end
             end, 50)
         end

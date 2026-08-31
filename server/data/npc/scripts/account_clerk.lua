@@ -15,9 +15,13 @@ function onThink() npcHandler:onThink() end
 local ACCOUNT_MANAGER_NAME = "Account Manager"
 local CHARACTER_MANAGER_PREFIX = "Character Manager "
 local STARTER_TOWN_ID = 11
+-- Accessible spawn for fresh characters. Deliberately NOT the sealed manager
+-- room (32096, 32219, 5): characters created there could never leave it.
 local STARTER_POSITION = {x = 32097, y = 32219, z = 7}
 local FEMALE_LOOKTYPE = 136
 local MALE_LOOKTYPE = 128
+local MIN_PASSWORD_LENGTH = 7
+local ACCOUNT_NUMBER_RETRIES = 10
 
 local STEP_PASSWORD = 1
 local STEP_NAME = 2
@@ -84,26 +88,33 @@ local function createCharacterManager(accountId, accountNumber)
 	return createCharacter(managerName, accountId, 1)
 end
 
+local function nextAccountNumber()
+	-- Single-threaded Lua on the Dispatcher: read/increment/write is race-free.
+	-- The counter is seeded from the accounts table on startup (startup.lua).
+	local counter = getGlobalStorageValue(GlobalStorageKeys.accountNumberCounter)
+	if not counter or counter < 1 then
+		counter = 1
+	end
+	counter = counter + 1
+	setGlobalStorageValue(GlobalStorageKeys.accountNumberCounter, counter)
+	return counter
+end
+
 local function createAccount(cid, password)
-	local nextAccountNumber = 1
-	local resultId = db.storeQuery("SELECT MAX(CAST(`name` AS UNSIGNED)) AS `max_number` FROM `accounts` WHERE `name` REGEXP '^[0-9]+$'")
-	if resultId ~= false then
-		nextAccountNumber = result.getNumber(resultId, "max_number") + 1
-		result.free(resultId)
+	for _ = 1, ACCOUNT_NUMBER_RETRIES do
+		local accountNumber = tostring(nextAccountNumber())
+		if db.query("INSERT INTO `accounts` (`name`, `password`, `creation`) VALUES (" .. db.escapeString(accountNumber) .. ", SHA1(" .. db.escapeString(password) .. "), " .. os.time() .. ")") then
+			local accountId = db.lastInsertId()
+			if not createCharacterManager(accountId, accountNumber) then
+				db.query("DELETE FROM `accounts` WHERE `id` = " .. accountId)
+				return nil
+			end
+
+			return accountId, accountNumber
+		end
 	end
 
-	local accountNumber = tostring(nextAccountNumber)
-	if not db.query("INSERT INTO `accounts` (`name`, `password`, `creation`) VALUES (" .. db.escapeString(accountNumber) .. ", SHA1(" .. db.escapeString(password) .. "), " .. os.time() .. ")") then
-		return nil
-	end
-
-	local accountId = db.lastInsertId()
-	if not createCharacterManager(accountId, accountNumber) then
-		db.query("DELETE FROM `accounts` WHERE `id` = " .. accountId)
-		return nil
-	end
-
-	return accountId, accountNumber
+	return nil
 end
 
 createCharacter = function(name, accountId, sex)
@@ -163,8 +174,15 @@ local function creatureSayCallback(cid, type, msg)
 	end
 
 	if state.step == STEP_PASSWORD then
+		-- Managers only reach this NPC inside the sealed room (login.lua),
+		-- so the password cannot be overheard by other players.
 		if message == "" then
 			npcHandler:say("Tell me the password you want to use for the new account.", cid)
+			return true
+		end
+
+		if #message < MIN_PASSWORD_LENGTH then
+			npcHandler:say("The password must have at least " .. MIN_PASSWORD_LENGTH .. " characters. Tell me another password.", cid)
 			return true
 		end
 

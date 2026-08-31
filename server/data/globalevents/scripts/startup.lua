@@ -13,7 +13,9 @@ local ACCOUNT_MANAGER = {
 	sex = 1,
 	lookType = 128,
 	townId = 11,
-	position = {x = 32097, y = 32219, z = 7}
+	-- Sealed room: players can only reach it through the manager login
+	-- teleport, so password conversations with the Account Clerk stay private.
+	position = {x = 32096, y = 32219, z = 5}
 }
 
 local function purgeWormsFromDatabase()
@@ -80,6 +82,22 @@ local function ensureAccountManager()
 		" WHERE `name` = " .. db.escapeString(ACCOUNT_MANAGER.characterName))
 end
 
+local function seedAccountNumberCounter()
+	local maxNumber = 0
+	local resultId = db.storeQuery("SELECT MAX(CAST(`name` AS UNSIGNED)) AS `max_number` FROM `accounts` WHERE `name` REGEXP '^[0-9]+$'")
+	if resultId ~= false then
+		local value = result.getNumber(resultId, "max_number")
+		if value and value > maxNumber then
+			maxNumber = value
+		end
+		result.free(resultId)
+	end
+
+	if getGlobalStorageValue(GlobalStorageKeys.accountNumberCounter) < maxNumber then
+		setGlobalStorageValue(GlobalStorageKeys.accountNumberCounter, maxNumber)
+	end
+end
+
 function onStartup()
 	setGlobalStorageValue(11003, -1)
 
@@ -128,6 +146,7 @@ function onStartup()
 	end
 
 	ensureAccountManager()
+	seedAccountNumberCounter()
 
 	local removedHouseWorms = purgeWormsFromLoadedHouses()
 	if removedHouseWorms > 0 then

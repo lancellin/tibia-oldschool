@@ -25,4 +25,7 @@ PlayerStorageKeys = {
 }
 
 GlobalStorageKeys = {
+	-- Sequential number used for accounts created through the Account Clerk.
+	-- Seeded from the accounts table on server startup (see globalevents/startup.lua).
+	accountNumberCounter = 90001,
 }

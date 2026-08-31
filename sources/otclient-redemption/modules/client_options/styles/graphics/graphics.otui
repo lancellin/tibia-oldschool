@@ -25,20 +25,8 @@ UIWidget
     height: 22
 
     OptionCheckBoxMarked
-      id: enableHdSprites
-      !text: tr('Enable HD sprites (experimental)')
-      !tooltip: tr('Uses optional high-resolution overrides when Tibia.cwm is available.')
-
-  SmallReversedQtPanel
-    anchors.left: parent.left
-    anchors.right: parent.right
-    anchors.top: prev.bottom
-    margin-top: 7
-    height: 22
-
-    OptionCheckBoxMarked
       id: enableHdFastPack
-      !text: tr('Enable HD fast pack (experimental)')
+      !text: tr('Enable HD Sprites')
       !tooltip: tr('Uses optional raw RGBA high-resolution sprites when Tibia.hdp is available. Falls back to the normal HD CWM pack if needed.')
 
   SmallReversedQtPanel

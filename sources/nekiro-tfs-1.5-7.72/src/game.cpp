@@ -8384,6 +8384,20 @@ bool Game::playerSpeakTo(Player* player, SpeakClasses type, const std::string& r
 {
 	Player* toPlayer = getPlayerByName(receiver);
 	if (!toPlayer) {
+		// Private messages addressed to an NPC (e.g. passwords sent privately
+		// to the Account Clerk) are delivered directly to it instead of being
+		// rejected, so nearby players cannot read them.
+		const std::string lowerCaseReceiver = asLowerCaseString(receiver);
+		SpectatorVec spectators;
+		map.getSpectators(spectators, player->getPosition());
+		for (Creature* spectator : spectators) {
+			if (spectator->getNpc() && lowerCaseReceiver == asLowerCaseString(spectator->getName())) {
+				spectator->onCreatureSay(player, TALKTYPE_PRIVATE, text);
+				player->sendTextMessage(MESSAGE_STATUS_SMALL, fmt::format("Message sent to {:s}.", spectator->getName()));
+				return true;
+			}
+		}
+
 		player->sendTextMessage(MESSAGE_STATUS_SMALL, "A player with this name is not online.");
 		return false;
 	}

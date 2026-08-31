@@ -40,9 +40,6 @@ local buttons = { {
     }, {
         text = "Console",
         open = "interfaceConsole"
-    }, {
-        text = "Action Bars",
-        open = "actionbars"
     } }
 }, {
     text = "Graphics",
@@ -92,7 +89,9 @@ local forcedOptionValues = {
     ambientLight = 0,
     shadowFloorIntensity = 100,
     floorFading = 1,
-    floorViewMode = 0
+    floorViewMode = 0,
+    -- Hidden from the Graphics tab; keep it locked off so stale settings don't apply
+    enableHdSprites = false
 }
 
 local function syncHdSpriteAntialiasingState()
@@ -162,8 +161,6 @@ local function setupComboBox()
     local framesRarityCombobox = panels.interface:recursiveGetChildById('frames')
     local vocationPresetsCombobox = panels.keybindsPanel:recursiveGetChildById('list')
     local listKeybindsPanel = panels.keybindsPanel:recursiveGetChildById('list')
-    local mouseControlModeCombobox = panels.generalPanel:recursiveGetChildById('mouseControlMode')
-    local lootControlModeCombobox = panels.generalPanel:recursiveGetChildById('lootControlMode')
 
     for k, v in pairs({ { 'Disabled', 'disabled' }, { 'Default', 'default' }, { 'Full', 'full' }, { 'Animation', 'animation' } }) do
         crosshairCombo:addOption(v[1], v[2])
@@ -171,26 +168,6 @@ local function setupComboBox()
 
     crosshairCombo.onOptionChange = function(comboBox, option)
         setOption('crosshair', comboBox:getCurrentOption().data)
-    end
-
-    mouseControlModeCombobox:addOption('Regular Controls', 0)
-    mouseControlModeCombobox:addOption('Classic Controls', 1)
-    mouseControlModeCombobox:addOption('Left Smart-Click', 2)
-
-    lootControlModeCombobox:addOption('Loot: Right', 0)
-    lootControlModeCombobox:addOption('Loot: SHIFT+Right', 1)
-    lootControlModeCombobox:addOption('Loot: Left', 2)
-    
-    lootControlModeCombobox.onOptionChange = function(comboBox, option)
-        setOption('lootControlMode', comboBox:getCurrentOption().data)
-    end
-
-    mouseControlModeCombobox.onOptionChange = function(comboBox, option)
-        local selectedOption = comboBox:getCurrentOption().data
-        setOption('mouseControlMode', selectedOption)
-        
-        -- The mouseControlMode action handler will take care of updating
-        -- classicControl and smartLeftClick, and their UI visibility
     end
 
     for k, t in pairs({ 'None', 'Antialiasing', 'Smooth Retro' }) do
@@ -276,41 +253,6 @@ local function setup()
         end
     end
     
-    -- Schedule combobox updates to ensure they happen after UI setup is complete
-    scheduleEvent(function()
-        local mouseControlModeCombobox = panels.generalPanel:recursiveGetChildById('mouseControlMode')
-        local lootControlModeCombobox = panels.generalPanel:recursiveGetChildById('lootControlMode')
-        
-        if mouseControlModeCombobox then
-            -- Use setCurrentOptionByData for more precise control
-            for i = 0, 2 do
-                if i == options.mouseControlMode.value then
-                    mouseControlModeCombobox:setCurrentOptionByData(i)
-                    break
-                end
-            end
-        end
-        
-        if lootControlModeCombobox then
-            -- Use setCurrentOptionByData for more precise control
-            for i = 0, 2 do
-                if i == options.lootControlMode.value then
-                    lootControlModeCombobox:setCurrentOptionByData(i)
-                    break
-                end
-            end
-        end
-        
-        -- Update loot control mode visibility
-        if lootControlModeCombobox and mouseControlModeCombobox then
-            if options.mouseControlMode.value == 1 then
-                lootControlModeCombobox:setVisible(true)
-            else
-                lootControlModeCombobox:setVisible(false)
-            end
-        end
-    end, 100)
-
     local talkOnRightClick = panels.generalPanel:recursiveGetChildById('talkOnRightClick')
     if talkOnRightClick then
         local parent = talkOnRightClick:getParent()
@@ -365,31 +307,7 @@ function controller:onInit()
 
     configureCharacterCategories()
     addEvent(setup)
-    
-    -- Add a special delayed event to update comboboxes after everything is loaded
-    scheduleEvent(function()
-        local mouseControlModeCombobox = panels.generalPanel:recursiveGetChildById('mouseControlMode')
-        local lootControlModeCombobox = panels.generalPanel:recursiveGetChildById('lootControlMode')
-        
-        if mouseControlModeCombobox then
-            for i = 0, 2 do
-                if i == options.mouseControlMode.value then
-                    mouseControlModeCombobox:setCurrentOptionByData(i)
-                    break
-                end
-            end
-        end
-        
-        if lootControlModeCombobox then
-            for i = 0, 2 do
-                if i == options.lootControlMode.value then
-                    lootControlModeCombobox:setCurrentOptionByData(i)
-                    break
-                end
-            end
-        end
-    end, 1000)  -- 1 second delay to make sure everything is loaded
-    
+
     init_binds()
 
     Keybind.new("UI", "Toggle Fullscreen", "Ctrl+Shift+F", "")

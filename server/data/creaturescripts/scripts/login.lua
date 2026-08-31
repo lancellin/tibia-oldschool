@@ -1,5 +1,6 @@
 function onLogin(player)
-	local managerPosition = Position(32097, 32219, 7)
+	-- Sealed room: only reachable through this manager teleport.
+	local managerPosition = Position(32096, 32219, 5)
 	local playerName = player:getName()
 	local isCharacterManager = playerName:sub(1, #"Character Manager ") == "Character Manager "
 
