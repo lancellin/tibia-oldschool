@@ -81,6 +81,10 @@ __pycache__/
 /server/*.zip
 /server/data/world/*.bak-*
 
+# MyAAC website: release de terceiro + vendor/assets gerados + config.local.php
+# com credenciais de banco. Setup documentado em docs/WEBSITE_SETUP.md.
+/website/
+
 # World map files (versioned separately)
 /server/data/world/world.otbm
 /server/data/world/backup de mapa/

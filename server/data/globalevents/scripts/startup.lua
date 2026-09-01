@@ -6,17 +6,6 @@ local wormItemTables = {
 	"player_storeinboxitems",
 	"player_items"
 }
-local ACCOUNT_MANAGER = {
-	accountName = "1",
-	password = "1",
-	characterName = "Account Manager",
-	sex = 1,
-	lookType = 128,
-	townId = 11,
-	-- Sealed room: players can only reach it through the manager login
-	-- teleport, so password conversations with the Account Clerk stay private.
-	position = {x = 32096, y = 32219, z = 5}
-}
 
 local function purgeWormsFromDatabase()
 	for _, tableName in ipairs(wormItemTables) do
@@ -56,30 +45,6 @@ local function purgeWormsFromLoadedHouses()
 		removed = removed + purgeWormsFromHouse(house)
 	end
 	return removed
-end
-
-local function ensureAccountManager()
-	db.query("INSERT IGNORE INTO `accounts` (`name`, `password`, `creation`) VALUES (" .. db.escapeString(ACCOUNT_MANAGER.accountName) .. ", SHA1(" .. db.escapeString(ACCOUNT_MANAGER.password) .. "), " .. os.time() .. ")")
-	db.query("UPDATE `accounts` SET `password` = SHA1(" .. db.escapeString(ACCOUNT_MANAGER.password) .. ") WHERE `name` = " .. db.escapeString(ACCOUNT_MANAGER.accountName))
-
-	local accountId = nil
-	local resultId = db.storeQuery("SELECT `id` FROM `accounts` WHERE `name` = " .. db.escapeString(ACCOUNT_MANAGER.accountName))
-	if resultId ~= false then
-		accountId = result.getNumber(resultId, "id")
-		result.free(resultId)
-	end
-
-	if not accountId then
-		print("> Failed to resolve the seeded Account Manager account.")
-		return
-	end
-
-	db.query("INSERT IGNORE INTO `players` (`name`, `account_id`, `sex`, `looktype`, `town_id`, `posx`, `posy`, `posz`) VALUES (" ..
-		db.escapeString(ACCOUNT_MANAGER.characterName) .. ", " .. accountId .. ", " .. ACCOUNT_MANAGER.sex .. ", " .. ACCOUNT_MANAGER.lookType .. ", " .. ACCOUNT_MANAGER.townId .. ", " ..
-		ACCOUNT_MANAGER.position.x .. ", " .. ACCOUNT_MANAGER.position.y .. ", " .. ACCOUNT_MANAGER.position.z .. ")")
-	db.query("UPDATE `players` SET `account_id` = " .. accountId .. ", `sex` = " .. ACCOUNT_MANAGER.sex .. ", `looktype` = " .. ACCOUNT_MANAGER.lookType .. ", `town_id` = " .. ACCOUNT_MANAGER.townId ..
-		", `posx` = " .. ACCOUNT_MANAGER.position.x .. ", `posy` = " .. ACCOUNT_MANAGER.position.y .. ", `posz` = " .. ACCOUNT_MANAGER.position.z ..
-		" WHERE `name` = " .. db.escapeString(ACCOUNT_MANAGER.characterName))
 end
 
 local function seedAccountNumberCounter()
@@ -145,7 +110,6 @@ function onStartup()
 		db.query("INSERT INTO `towns` (`id`, `name`, `posx`, `posy`, `posz`) VALUES (" .. town:getId() .. ", " .. db.escapeString(town:getName()) .. ", " .. position.x .. ", " .. position.y .. ", " .. position.z .. ")")
 	end
 
-	ensureAccountManager()
 	seedAccountNumberCounter()
 
 	local removedHouseWorms = purgeWormsFromLoadedHouses()
