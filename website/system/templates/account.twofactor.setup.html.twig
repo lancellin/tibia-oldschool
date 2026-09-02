@@ -1,0 +1,92 @@
+<h3>Two-Factor Authentication</h3>
+
+{% if notice != '' %}
+	<p><b>{{ notice }}</b></p>
+{% endif %}
+
+{% if errors|length > 0 %}
+	{% include 'error_box.html.twig' with {'errors': errors} %}
+{% endif %}
+
+{% if not enabled %}
+	<p>Two-factor authentication is <b>disabled</b> on your account.</p>
+
+	{% if setup %}
+		<p>
+			Scan the QR code with your authenticator app (Google Authenticator, Microsoft
+			Authenticator or similar), or type the secret manually. Then enter the current
+			6-digit code to finish enabling. The QR code and secret are shown only during
+			this setup.
+		</p>
+		<div id="twofactor_qr" style="margin:10px 0;"></div>
+		<p>Secret: <b>{{ setup.secret }}</b></p>
+
+		<form method="post" action="{{ getLink('account/twofactor-setup') }}">
+			{{ csrf() }}
+			<input type="hidden" name="action" value="confirm" />
+			Code: <input type="text" name="code" size="8" maxlength="6" autocomplete="one-time-code" />
+			<input type="submit" value="Enable" />
+		</form>
+		<br/>
+		<form method="post" action="{{ getLink('account/twofactor-setup') }}">
+			{{ csrf() }}
+			<input type="hidden" name="action" value="cancel_setup" />
+			<input type="submit" value="Cancel setup" />
+		</form>
+
+		<script src="{{ constant('BASE_URL') }}tools/ext/qrcode/qrcode.min.js"></script>
+		<script>new QRCode(document.getElementById("twofactor_qr"), {{ setup.uri|json_encode|raw }});</script>
+	{% else %}
+		<form method="post" action="{{ getLink('account/twofactor-setup') }}">
+			{{ csrf() }}
+			<input type="hidden" name="action" value="begin" />
+			<input type="submit" value="Enable two-factor authentication" />
+		</form>
+	{% endif %}
+{% else %}
+	<p>Two-factor authentication is <b>enabled</b> on your account.</p>
+
+	<h4>Trusted devices</h4>
+	{% if devices|length > 0 %}
+		<table cellspacing="1" cellpadding="4" border="0" width="100%">
+			<tr>
+				<th>Device</th>
+				<th>Added</th>
+				<th>Expires</th>
+				<th></th>
+			</tr>
+			{% for d in devices %}
+				<tr>
+					<td>{{ d.label }}</td>
+					<td>{{ d.created_at|date("d.m.Y H:i") }}</td>
+					<td>{{ d.expires_at|date("d.m.Y H:i") }}</td>
+					<td>
+						<form method="post" action="{{ getLink('account/twofactor-setup') }}" style="display:inline;">
+							{{ csrf() }}
+							<input type="hidden" name="action" value="revoke" />
+							<input type="hidden" name="device" value="{{ d.id }}" />
+							<input type="submit" value="Remove" />
+						</form>
+					</td>
+				</tr>
+			{% endfor %}
+		</table>
+	{% else %}
+		<p>No trusted devices.</p>
+	{% endif %}
+
+	<br/>
+	<form method="post" action="{{ getLink('account/twofactor-setup') }}">
+		{{ csrf() }}
+		<input type="hidden" name="action" value="revoke_all" />
+		Code: <input type="text" name="code" size="8" maxlength="6" autocomplete="one-time-code" />
+		<input type="submit" value="Remove all trusted devices" />
+	</form>
+	<br/>
+	<form method="post" action="{{ getLink('account/twofactor-setup') }}">
+		{{ csrf() }}
+		<input type="hidden" name="action" value="disable" />
+		Code: <input type="text" name="code" size="8" maxlength="6" autocomplete="one-time-code" />
+		<input type="submit" value="Disable two-factor authentication" />
+	</form>
+{% endif %}

@@ -68,7 +68,9 @@ function onStartup()
 
 	db.query("TRUNCATE TABLE `players_online`")
 	db.asyncQuery("DELETE FROM `guild_wars` WHERE `status` = 0")
-	db.asyncQuery("DELETE FROM `players` WHERE `deletion` != 0 AND `deletion` < " .. os.time())
+	-- deleted characters are NEVER physically removed: `deletion` holds the
+	-- deletion request timestamp (7-day cancellation grace period on the site);
+	-- they only disappear from the owner's account view and from login.
 	db.asyncQuery("DELETE FROM `ip_bans` WHERE `expires_at` != 0 AND `expires_at` <= " .. os.time())
 	db.asyncQuery("DELETE FROM `market_history` WHERE `inserted` <= " .. (os.time() - configManager.getNumber(configKeys.MARKET_OFFER_DURATION)))
 	purgeWormsFromDatabase()

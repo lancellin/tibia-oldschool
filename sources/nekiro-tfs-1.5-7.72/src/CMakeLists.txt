@@ -81,6 +81,8 @@ set(tfs_SRC
 	${CMAKE_CURRENT_LIST_DIR}/thing.cpp
 	${CMAKE_CURRENT_LIST_DIR}/tile.cpp
 	${CMAKE_CURRENT_LIST_DIR}/tools.cpp
+	${CMAKE_CURRENT_LIST_DIR}/totp.cpp
+	${CMAKE_CURRENT_LIST_DIR}/twofactor.cpp
 	${CMAKE_CURRENT_LIST_DIR}/trashholder.cpp
 	${CMAKE_CURRENT_LIST_DIR}/vocation.cpp
 	${CMAKE_CURRENT_LIST_DIR}/weapons.cpp

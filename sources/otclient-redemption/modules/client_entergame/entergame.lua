@@ -17,6 +17,7 @@ local clientBox
 local protocolLogin
 local motdEnabled = true
 local tokenWindow
+local twoFactorWindow
 local authErrorBox
 local hasAttemptedAuthenticator = false
 local startupLoading
@@ -130,6 +131,10 @@ local function onSessionKey(protocol, sessionKey)
 end
 
 local function onCharacterList(protocol, characters, account, otui)
+    -- login succeeded: drop any pending two-factor state
+    G.twoFactorCode = nil
+    G.twoFactorTrust = false
+
     local httpLogin = enterGame:getChildById('httpLoginBox'):isChecked()
 
     -- Try add server to the server list
@@ -870,6 +875,20 @@ function EnterGame.loginSuccess(requestId, jsonSession, jsonWorlds, jsonCharacte
     onCharacterList(nil, characters, account)
 end
 
+local function onTwoFactorRequired()
+    if loadBox then
+        loadBox:destroy()
+        loadBox = nil
+    end
+    EnterGame.showTwoFactorInput()
+end
+
+local function onTwoFactorToken(protocol, token)
+    if G.account then
+        g_settings.set('twofactor_token_' .. G.account, token)
+    end
+end
+
 function EnterGame.loginFailed(requestId, msg, result)
     if G.requestId ~= requestId then
         return
@@ -909,6 +928,13 @@ function EnterGame.doLogin()
         protocolLogin.onSessionKey = onSessionKey
         protocolLogin.onCharacterList = onCharacterList
         protocolLogin.onUpdateNeeded = onUpdateNeeded
+        protocolLogin.onTwoFactorRequired = onTwoFactorRequired
+        protocolLogin.onTwoFactorToken = onTwoFactorToken
+        protocolLogin.twoFactor = {
+            code = G.twoFactorCode,
+            trust = G.twoFactorTrust,
+            token = g_settings.get('twofactor_token_' .. G.account) or ''
+        }
 
         loadBox = displayCancelBox(tr('Please wait'), tr('Connecting to login server...'))
         loadBox:setImageColor('#c6dcffff')
@@ -1167,6 +1193,129 @@ function EnterGame.showAuthenticatorInput()
     
     -- Connect text edit Enter key
     connect(tokenEdit, {
+        onEnter = okCallback
+    })
+end
+
+function EnterGame.showTwoFactorInput()
+    if twoFactorWindow then
+        twoFactorWindow:destroy()
+        twoFactorWindow = nil
+    end
+
+    twoFactorWindow = g_ui.createWidget('MessageBoxWindow', rootWidget)
+    twoFactorWindow.title = twoFactorWindow:getChildById('title')
+    twoFactorWindow.title:setText(tr('Two-Factor Authentication'))
+
+    twoFactorWindow.content = twoFactorWindow:getChildById('content')
+    twoFactorWindow.content:setText(tr('Enter the 6-digit code from your authenticator app:'))
+    twoFactorWindow.content:setColor('#c0c0c0')
+    twoFactorWindow.content:resizeToText()
+    twoFactorWindow.content:breakAnchors()
+    twoFactorWindow.content:addAnchor(AnchorLeft, 'parent', AnchorLeft)
+    twoFactorWindow.content:addAnchor(AnchorTop, 'parent', AnchorTop)
+    twoFactorWindow.content:setMarginLeft(15)
+    twoFactorWindow.content:setMarginTop(32)
+
+    local codeEdit = g_ui.createWidget('TextEdit', twoFactorWindow)
+    codeEdit:setId('twoFactorEdit')
+    codeEdit:addAnchor(AnchorHorizontalCenter, 'parent', AnchorHorizontalCenter)
+    codeEdit:addAnchor(AnchorTop, 'content', AnchorBottom)
+    codeEdit:setMarginTop(10)
+    codeEdit:setMaxLength(6)
+    codeEdit:setWidth(320)
+    codeEdit:setHeight(16)
+    codeEdit:focus()
+
+    local trustBox = g_ui.createWidget('CheckBox', twoFactorWindow)
+    trustBox:setId('twoFactorTrustBox')
+    trustBox:setText(tr('Trust this device for 30 days'))
+    trustBox:resizeToText()
+    trustBox:breakAnchors()
+    trustBox:addAnchor(AnchorLeft, 'parent', AnchorLeft)
+    trustBox:addAnchor(AnchorTop, 'twoFactorEdit', AnchorBottom)
+    trustBox:setMarginTop(8)
+    trustBox:setMarginLeft(15)
+
+    local separator = g_ui.createWidget('HorizontalSeparator', twoFactorWindow)
+    separator:setId('twoFactorSeparator')
+    separator:addAnchor(AnchorLeft, 'parent', AnchorLeft)
+    separator:addAnchor(AnchorRight, 'parent', AnchorRight)
+    separator:addAnchor(AnchorTop, 'twoFactorTrustBox', AnchorBottom)
+    separator:setMarginTop(10)
+    separator:setMarginLeft(15)
+    separator:setMarginRight(15)
+
+    twoFactorWindow.holder = twoFactorWindow:getChildById('holder')
+    twoFactorWindow.holder:breakAnchors()
+    twoFactorWindow.holder:addAnchor(AnchorRight, 'twoFactorSeparator', AnchorRight)
+    twoFactorWindow.holder:addAnchor(AnchorLeft, 'twoFactorSeparator', AnchorLeft)
+    twoFactorWindow.holder:addAnchor(AnchorTop, 'twoFactorSeparator', AnchorBottom)
+    twoFactorWindow.holder:addAnchor(AnchorBottom, 'parent', AnchorBottom)
+    twoFactorWindow.holder:setMarginTop(12)
+
+    local okCallback = function()
+        local code = codeEdit:getText()
+        if not code or code:len() == 0 then
+            if authErrorBox then
+                authErrorBox:destroy()
+            end
+            authErrorBox = displayErrorBox(tr('Error'), tr('Code is required.'))
+            connect(authErrorBox, {
+                onOk = function()
+                    authErrorBox = nil
+                    if twoFactorWindow then
+                        twoFactorWindow:raise()
+                        twoFactorWindow:focus()
+                        codeEdit:focus()
+                    end
+                end
+            })
+            return
+        end
+
+        G.twoFactorCode = code
+        G.twoFactorTrust = trustBox:isChecked()
+        if twoFactorWindow then
+            twoFactorWindow:destroy()
+            twoFactorWindow = nil
+        end
+        EnterGame.doLogin()
+    end
+
+    local cancelCallback = function()
+        G.twoFactorCode = nil
+        G.twoFactorTrust = false
+        if twoFactorWindow then
+            twoFactorWindow:destroy()
+            twoFactorWindow = nil
+        end
+        EnterGame.show()
+    end
+
+    local cancelButton = twoFactorWindow:addButton(tr('Cancel'), cancelCallback)
+    cancelButton:breakAnchors()
+    cancelButton:addAnchor(AnchorTop, 'parent', AnchorTop)
+    cancelButton:addAnchor(AnchorRight, 'parent', AnchorRight)
+    cancelButton:setWidth(45)
+
+    local okButton = twoFactorWindow:addButton(tr('Ok'), okCallback)
+    okButton:breakAnchors()
+    okButton:addAnchor(AnchorTop, 'prev', AnchorTop)
+    okButton:addAnchor(AnchorRight, 'prev', AnchorLeft)
+    okButton:setMarginRight(10)
+    okButton:setWidth(40)
+
+    local windowWidth = 350
+    local windowHeight = 28 + twoFactorWindow.content:getHeight() + 10 + codeEdit:getHeight() + 8 + trustBox:getHeight() + 10 + 2 + 12 + okButton:getHeight() + 12
+    twoFactorWindow:setWidth(windowWidth)
+    twoFactorWindow:setHeight(windowHeight)
+
+    connect(twoFactorWindow, {
+        onEnter = okCallback,
+        onEscape = cancelCallback
+    })
+    connect(codeEdit, {
         onEnter = okCallback
     })
 end

@@ -1,0 +1,41 @@
+{{ include('tinymce.html.twig') }}
+<script type="text/javascript">
+	tinymceInit();
+</script>
+
+<div align="center" class="text-center"><p class="note">Sending mails may take some time if there are many users in db.</p></div>
+<div class="card card-info card-outline">
+	<div class="card-header">
+		<h5 class="m-0">Mailer</h5>
+	</div>
+	<form id="form" method="post">
+		{{ csrf() }}
+		<div class="card-body">
+			<div class="form-group row">
+				<label for="mail_to">To: (enter email, or leave empty to all)</label>
+				<input class="form-control" type="text" id="mail_to" name="mail_to" value="{{ mail_to }}"/>
+			</div>
+
+			{% if setting('core.account_mail_verify') %}
+				<div class="form-check">
+					<input type="checkbox" class="form-check-input" id="mail_verified_only" name="mail_verified_only" {% if mail_verified_only %}checked{% endif %}>
+					<label class="form-check-label" for="mail_verified_only">Mail only verified users</label>
+				</div>
+			{% endif %}
+
+			<div class="form-group row">
+				<label for="mail_subject">Subject:</label>
+				<input class="form-control" type="text" id="mail_subject" name="mail_subject" value="{{ mail_subject }}" maxlength="30"/>
+			</div>
+
+			<label for="editor" class="control-label">Content:</label>
+			<div class="form-group row">
+				<textarea id="editor" name="mail_content" style="width: 100%" class="tinymce">{{ mail_content }}</textarea>
+			</div>
+		</div>
+		<div class="card-footer">
+			<button type="submit" name="submit" class="btn btn-info"><i class="fas fa-share"></i> Send</button>
+			<a href="{{ constant('ADMIN_URL') }}?p=mailer" class="btn btn-danger float-right">Cancel</a>
+		</div>
+	</form>
+</div>

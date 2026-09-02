@@ -10,6 +10,8 @@ LoginServerUpdateNeeded = 30
 LoginServerSessionKey = 40
 LoginServerCharacterList = 100
 LoginServerExtendedCharacterList = 101
+LoginServerTwoFactorRequired = 46
+LoginServerTwoFactorToken = 47
 
 -- Since 10.76
 LoginServerRetry = 10
@@ -32,6 +34,16 @@ end
 
 function ProtocolLogin:cancelLogin()
     self:disconnect()
+end
+
+-- Two-factor payload appended after the password (inside the RSA block).
+-- Always present (possibly empty) so the server can parse it deterministically.
+function ProtocolLogin:getLoginExtendedData()
+    local tf = self.twoFactor
+    if not tf then
+        return ''
+    end
+    return '2FA1\n' .. (tf.code or '') .. '\n' .. (tf.trust and '1' or '0') .. '\n' .. (tf.token or '')
 end
 
 function ProtocolLogin:sendLoginPacket()
@@ -169,6 +181,11 @@ function ProtocolLogin:onRecv(msg)
         elseif opcode == LoginServerTokenError then
             local unknown = msg:getU8()
             signalcall(self.onLoginError, self, tr('Invalid authenticator token.'))
+        elseif opcode == LoginServerTwoFactorRequired then
+            signalcall(self.onTwoFactorRequired, self)
+        elseif opcode == LoginServerTwoFactorToken then
+            local token = msg:getString()
+            signalcall(self.onTwoFactorToken, self, token)
         elseif opcode == LoginServerCharacterList then
             self:parseCharacterList(msg)
         elseif opcode == LoginServerExtendedCharacterList then

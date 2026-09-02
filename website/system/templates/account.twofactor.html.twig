@@ -1,0 +1,26 @@
+Please enter the 6-digit code from your authenticator app (Google Authenticator, Microsoft Authenticator or similar).<br/><br/>
+
+{% if errors|length > 0 %}
+	{% include 'error_box.html.twig' with {'errors': errors} %}
+{% endif %}
+
+<form action="{{ getLink('account/twofactor') }}" method="post">
+	{{ csrf() }}
+	<table cellspacing="1" cellpadding="4" border="0" width="100%">
+		<tr>
+			<td width="120">Code:</td>
+			<td><input type="text" name="code" size="8" maxlength="6" autocomplete="one-time-code" autofocus /></td>
+		</tr>
+		<tr>
+			<td></td>
+			<td>
+				<input type="checkbox" name="trust" value="1" id="twofactor_trust" />
+				<label for="twofactor_trust">Trust this device for 30 days</label>
+			</td>
+		</tr>
+	</table>
+	<br/>
+	<div style="text-align:center;">
+		<input type="submit" value="Submit" />
+	</div>
+</form>

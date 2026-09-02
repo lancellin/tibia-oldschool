@@ -96,6 +96,7 @@ class ConfigManager
 			DEFAULT_PRIORITY,
 			MAP_AUTHOR,
 			CONFIG_FILE,
+			TOTP_KEY,
 
 			LAST_STRING_CONFIG /* this must be the last one */
 		};

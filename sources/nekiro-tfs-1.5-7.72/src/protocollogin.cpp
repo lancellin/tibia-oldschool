@@ -28,8 +28,12 @@
 #include "iologindata.h"
 #include "ban.h"
 #include "game.h"
+#include "totp.h"
+#include "twofactor.h"
 
 #include <fmt/format.h>
+
+#include <map>
 
 extern ConfigManager g_config;
 extern Game g_game;
@@ -45,7 +49,8 @@ void ProtocolLogin::disconnectClient(const std::string& message, uint16_t versio
 	disconnect();
 }
 
-void ProtocolLogin::getCharacterList(const std::string& accountName, const std::string& password, const std::string&, uint16_t version)
+void ProtocolLogin::getCharacterList(const std::string& accountName, const std::string& password, const std::string&, uint16_t version,
+                                     const std::string& twoFactorCode, const std::string& trustedToken, bool trustRequested)
 {
 	Account account;
 	if (!IOLoginData::loginserverAuthentication(accountName, password, account)) {
@@ -53,9 +58,53 @@ void ProtocolLogin::getCharacterList(const std::string& accountName, const std::
 		return;
 	}
 
+	// Two-factor authentication shared with the website: same TOTP secret and
+	// same trusted-device table. Accounts without a secret keep the old flow.
+	std::string newTrustedToken;
+	const std::string totpSecret = twofactor::getSecret(account.id);
+	if (!totpSecret.empty()) {
+		bool passed = false;
+		if (!trustedToken.empty() && twofactor::verifyTrustedDevice(account.id, trustedToken)) {
+			passed = true;
+		} else if (!twoFactorCode.empty() && totp::verify(totpSecret, twoFactorCode)) {
+			passed = true;
+			if (trustRequested) {
+				newTrustedToken = twofactor::issueTrustedDevice(account.id);
+			}
+		}
+
+		if (!passed) {
+			// brute-force throttle: 5 failed codes per 15 minutes per account+IP
+			static std::map<std::pair<uint32_t, uint32_t>, std::pair<int, int64_t>> attempts;
+			auto connection = getConnection();
+			const uint32_t ip = connection ? connection->getIP() : 0;
+			auto& entry = attempts[std::make_pair(account.id, ip)];
+			const int64_t now = time(nullptr);
+			if (now - entry.second > 900) {
+				entry = std::make_pair(0, now);
+			}
+
+			if (entry.first >= 5) {
+				disconnectClient("Too many attempts. Please try again in a few minutes.", version);
+				return;
+			}
+			entry.first++;
+
+			auto output = OutputMessagePool::getOutputMessage();
+			output->addByte(0x2E); // two-factor code required
+			send(output);
+			disconnect();
+			return;
+		}
+	}
+
 	//uint32_t ticks = time(nullptr) / AUTHENTICATOR_PERIOD;
 
 	auto output = OutputMessagePool::getOutputMessage();
+	if (!newTrustedToken.empty()) {
+		output->addByte(0x2F); // newly issued trusted-device token
+		output->addString(newTrustedToken);
+	}
 	/*if (!account.key.empty()) {
 		if (token.empty() || !(token == generateToken(account.key, ticks) || token == generateToken(account.key, ticks - 1) || token == generateToken(account.key, ticks + 1))) {
 			output->addByte(0x0D);
@@ -228,6 +277,31 @@ void ProtocolLogin::onRecvFirstMessage(NetworkMessage& msg)
 		return;
 	}
 
+	// Optional 2FA payload appended by the custom client right after the
+	// password (inside the RSA block): "2FA1\n<code>\n<trust 0|1>\n<trusted token>".
+	// Old clients append nothing here (random RSA padding), which reads as a
+	// zero-length string and is ignored.
+	std::string twoFactorCode;
+	std::string trustedToken;
+	bool trustRequested = false;
+	if (msg.getBufferPosition() + 2 <= msg.getLength() + 8) {
+		const uint16_t extLen = msg.get<uint16_t>();
+		if (extLen > 0 && extLen <= 512 && msg.getBufferPosition() + extLen <= msg.getLength() + 8) {
+			const std::string ext = msg.getString(extLen);
+			if (ext.compare(0, 5, "2FA1\n") == 0) {
+				const size_t p1 = ext.find('\n', 5);
+				if (p1 != std::string::npos) {
+					twoFactorCode = ext.substr(5, p1 - 5);
+					const size_t p2 = ext.find('\n', p1 + 1);
+					if (p2 != std::string::npos) {
+						trustRequested = ext.compare(p1 + 1, p2 - (p1 + 1), "1") == 0;
+						trustedToken = ext.substr(p2 + 1);
+					}
+				}
+			}
+		}
+	}
+
 	// read authenticator token and stay logged in flag from last 128 bytes
 	/*msg.skipBytes((msg.getLength() - 128) - msg.getBufferPosition());
 	if (!Protocol::RSA_decrypt(msg)) {
@@ -238,5 +312,5 @@ void ProtocolLogin::onRecvFirstMessage(NetworkMessage& msg)
 	std::string authToken = msg.getString();*/
 
 	auto thisPtr = std::static_pointer_cast<ProtocolLogin>(shared_from_this());
-	g_dispatcher.addTask(createTask(std::bind(&ProtocolLogin::getCharacterList, thisPtr, accountName, password, "", version)));
+	g_dispatcher.addTask(createTask(std::bind(&ProtocolLogin::getCharacterList, thisPtr, accountName, password, "", version, twoFactorCode, trustedToken, trustRequested)));
 }

@@ -191,3 +191,6 @@ ownerName = ""
 ownerEmail = ""
 url = "https://otland.net/"
 location = "Sweden"
+
+-- Chave compartilhada com o site (config.local.php totp_key) para o 2FA TOTP.
+totp_key = "6dc413c33305d05b558f3a7e9efc5f62b2565aaf6a01a882a8c5007900d104db"
